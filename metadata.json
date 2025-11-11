@@ -1,0 +1,7 @@
+{
+  "name": "Amplify AI",
+  "description": "The ultimate AI co-pilot for content creators. Analyze performance, generate on-brand content, and amplify your message across every platform. From sales calls to viral videos, this is your creative edge.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
