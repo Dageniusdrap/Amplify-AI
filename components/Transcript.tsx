@@ -10,6 +10,13 @@ interface TranscriptProps {
   mediaFile?: File | null;
 }
 
+const formatTime = (seconds?: number) => {
+  if (typeof seconds !== 'number' || isNaN(seconds)) return '00:00';
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
+
 export const Transcript: React.FC<TranscriptProps> = ({ transcript, mediaUrl, mediaFile }) => {
   const audioPlayerRef = useRef<AudioPlayerRef>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -87,9 +94,16 @@ export const Transcript: React.FC<TranscriptProps> = ({ transcript, mediaUrl, me
 
               {/* Content */}
               <div className="flex-1">
-                  <p className="font-bold text-sm text-gray-800 dark:text-gray-200">
-                      {getSpeakerName(entry.speaker)}
-                  </p>
+                  <div className="flex justify-between items-baseline">
+                      <p className="font-bold text-sm text-gray-800 dark:text-gray-200">
+                          {getSpeakerName(entry.speaker)}
+                      </p>
+                      {hasTimestamps && (
+                          <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex-shrink-0 ml-4">
+                              {formatTime(entry.startTime)}
+                          </span>
+                      )}
+                  </div>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{entry.text}</p>
               </div>
             </div>

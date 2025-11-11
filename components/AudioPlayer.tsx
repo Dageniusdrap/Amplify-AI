@@ -21,9 +21,12 @@ const formatTime = (time: number) => {
 
 export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(({ src, file, onTimeUpdate }, ref) => {
   const mediaRef = useRef<HTMLAudioElement & HTMLVideoElement>(null);
+  const speedMenuRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [isSpeedMenuOpen, setIsSpeedMenuOpen] = useState(false);
   
   const isVideo = file?.type.startsWith('video/');
 
@@ -71,6 +74,24 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(({ src, 
       }
   }, [src]);
 
+  useEffect(() => {
+    if (mediaRef.current) {
+      mediaRef.current.playbackRate = playbackRate;
+    }
+  }, [playbackRate]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (speedMenuRef.current && !speedMenuRef.current.contains(event.target as Node)) {
+        setIsSpeedMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   const togglePlayPause = () => {
     const media = mediaRef.current;
     if (!media) return;
@@ -101,6 +122,8 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(({ src, 
       }
     },
   }));
+  
+  const playbackRates = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
   return (
     <div className="w-full">
@@ -137,6 +160,28 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(({ src, 
             disabled={!duration}
           />
           <span className="text-xs text-gray-600 dark:text-gray-400 font-mono">{formatTime(duration)}</span>
+          <div className="relative" ref={speedMenuRef}>
+            <button
+                onClick={() => setIsSpeedMenuOpen(!isSpeedMenuOpen)}
+                className="text-xs font-mono w-14 text-center py-1 px-2 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 disabled:opacity-50"
+                disabled={!duration}
+            >
+                {playbackRate}x
+            </button>
+            {isSpeedMenuOpen && (
+                <div className="absolute bottom-full right-0 mb-2 w-20 bg-white dark:bg-gray-800 rounded-md shadow-lg border dark:border-gray-600 z-10 overflow-hidden">
+                    {playbackRates.map(rate => (
+                        <button
+                            key={rate}
+                            onClick={() => { setPlaybackRate(rate); setIsSpeedMenuOpen(false); }}
+                            className={`w-full text-center px-2 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${playbackRate === rate ? 'bg-indigo-500 text-white' : 'text-gray-700 dark:text-gray-200'}`}
+                        >
+                            {rate}x
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
         </div>
       </div>
     </div>
