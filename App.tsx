@@ -684,8 +684,7 @@ const App: React.FC = () => {
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex justify-between items-center h-16">
                     <div className="flex items-center">
-                        <LogoIcon className="h-8 w-8 text-indigo-500" />
-                        <span className="ml-3 text-xl font-bold">Amplify AI</span>
+                        <LogoIcon className="h-16 w-auto" />
                     </div>
                     {isAuthenticated && currentUser && (
                          <div id="user-menu-area" className="flex items-center space-x-4">
