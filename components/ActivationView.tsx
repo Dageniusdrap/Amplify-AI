@@ -16,6 +16,7 @@ export const ActivationView: React.FC<ActivationViewProps> = ({ user, onActivati
   const [activationCode, setActivationCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [codeResent, setCodeResent] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,6 +31,11 @@ export const ActivationView: React.FC<ActivationViewProps> = ({ user, onActivati
         setIsLoading(false);
         onActivationSuccess(user);
     }, 1500);
+  };
+
+  const handleResend = () => {
+    setCodeResent(true);
+    setTimeout(() => setCodeResent(false), 3000);
   };
 
   return (
@@ -72,6 +78,12 @@ export const ActivationView: React.FC<ActivationViewProps> = ({ user, onActivati
                         </button>
                     </div>
                 </form>
+                 <div className="mt-4 text-sm">
+                    <button onClick={handleResend} disabled={codeResent} className="font-medium text-indigo-600 hover:text-indigo-500 disabled:text-gray-400 disabled:cursor-not-allowed">
+                        Resend code
+                    </button>
+                    {codeResent && <p className="text-green-600 text-xs mt-1">A new code has been sent!</p>}
+                </div>
             </>
         )}
       </div>

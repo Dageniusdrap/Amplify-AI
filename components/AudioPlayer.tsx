@@ -4,6 +4,7 @@ import { PauseIcon } from './icons/PauseIcon';
 
 export interface AudioPlayerRef {
   seek: (time: number) => void;
+  media: (HTMLAudioElement & HTMLVideoElement) | null;
 }
 
 interface AudioPlayerProps {
@@ -121,6 +122,7 @@ export const AudioPlayer = forwardRef<AudioPlayerRef, AudioPlayerProps>(({ src, 
         }
       }
     },
+    media: mediaRef.current
   }));
   
   const playbackRates = [0.5, 0.75, 1, 1.25, 1.5, 2];

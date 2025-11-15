@@ -1,47 +1,59 @@
 import type { ViralScript } from '../types';
 
 export const parseViralScript = (markdownText: string): ViralScript => {
-  const sections: { [key: string]: string } = {};
+  const sections: { [key: string]: string[] } = {};
   const lines = markdownText.split('\n');
-  let currentKey = '';
-  let currentContent: string[] = [];
+  let currentKey: keyof ViralScript | null = null;
 
+  // More flexible keys to match potential AI outputs
   const keyMap: { [key: string]: keyof ViralScript } = {
-    'title options': 'titles',
+    'title': 'titles',
+    'seo description': 'description',
     'description': 'description',
+    'discoverability tags': 'tags',
     'tags': 'tags',
     'thumbnail concepts': 'thumbnailConcepts',
+    'thumbnail': 'thumbnailConcepts',
+    'engaging video script': 'script',
+    'video script': 'script',
     'script': 'script',
+    'frame flow': 'storyboard',
     'storyboard': 'storyboard',
+    'monetization strategy': 'monetization',
     'monetization': 'monetization',
   };
-
-  const finalizeSection = () => {
-    if (currentKey) {
-      sections[currentKey] = currentContent.join('\n').trim();
-    }
-  };
-
-  for (const line of lines) {
-    const match = line.match(/^##\s*(?:\d+\.\s*)?(.+)/);
-    if (match) {
-      finalizeSection();
-      const header = match[1].toLowerCase();
-      currentKey = Object.keys(keyMap).find(k => header.includes(k)) || '';
-      currentContent = [match[1]]; // Keep the header in the content
-    } else {
-      currentContent.push(line);
-    }
-  }
-  finalizeSection();
   
+  lines.forEach(line => {
+    const match = line.match(/^#+\s*(?:\d+\.\s*)?(.+)/); // Match any header level (#, ##, ###) with optional numbering
+    if (match) {
+      const header = match[1].toLowerCase().trim().replace(/:$/, ''); // Normalize header
+      
+      // Find the best matching key
+      const mappedKey = Object.entries(keyMap).find(([k]) => header.includes(k))?.[1];
+      
+      if (mappedKey) {
+        currentKey = mappedKey;
+        if (!sections[currentKey]) {
+            sections[currentKey] = [];
+        }
+      } else {
+        currentKey = null; // Unrecognized header, stop capturing until the next valid one
+      }
+    } else if (currentKey && line.trim()) { // Only push non-empty lines
+      sections[currentKey]?.push(line);
+    }
+  });
+
+  const getList = (key: keyof ViralScript): string[] => (sections[key] || []).map(s => s.replace(/^[-*]\s*/, '').trim()).filter(Boolean);
+  const getText = (key: keyof ViralScript): string => (sections[key] || []).join('\n').trim();
+
   return {
-    titles: (sections[keyMap['title options']] || '').split('\n').slice(1).filter(t => t.trim().length > 2),
-    description: (sections[keyMap['description']] || '').split('\n').slice(1).join('\n'),
-    tags: (sections[keyMap['tags']] || '').split('\n').slice(1).join('').split(',').map(t => t.trim()).filter(Boolean),
-    thumbnailConcepts: (sections[keyMap['thumbnail concepts']] || '').split('\n').slice(1).filter(t => t.trim().length > 2),
-    script: (sections[keyMap['script']] || '').split('\n').slice(1).join('\n'),
-    storyboard: (sections[keyMap['storyboard']] || '').split('\n').slice(1).join('\n'),
-    monetization: (sections[keyMap['monetization']] || '').split('\n').slice(1).join('\n'),
+    titles: getList('titles'),
+    description: getText('description'),
+    tags: getText('tags').split(/[,;\n]/).map(t => t.trim()).filter(Boolean),
+    thumbnailConcepts: getList('thumbnailConcepts'),
+    script: getText('script'),
+    storyboard: getText('storyboard'),
+    monetization: getText('monetization'),
   };
 };

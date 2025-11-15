@@ -4,6 +4,7 @@ import type { PerformanceMetricPoint } from '../types';
 
 interface PerformanceGraphProps {
   metrics: PerformanceMetricPoint[];
+  onTimeSegmentHover?: (label: string | null) => void;
 }
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#6366f1', '#8b5cf6'];
@@ -48,7 +49,7 @@ const AnnotationLabel = (props: any) => {
     );
 };
 
-export const PerformanceGraph: React.FC<PerformanceGraphProps> = ({ metrics: data }) => {
+export const PerformanceGraph: React.FC<PerformanceGraphProps> = ({ metrics: data, onTimeSegmentHover }) => {
   const [view, setView] = useState<'trend' | 'overview'>('trend');
   const metricKeys = useMemo(() => {
     if (!data || data.length === 0 || !data[0].scores || data[0].scores.length === 0) return [];
@@ -141,6 +142,23 @@ export const PerformanceGraph: React.FC<PerformanceGraphProps> = ({ metrics: dat
     );
   }
 
+  const handleMouseMove = (state: any) => {
+    if (onTimeSegmentHover) {
+        if (state.isTooltipActive && state.activeTooltipIndex !== undefined && chartData[state.activeTooltipIndex]) {
+            const label = chartData[state.activeTooltipIndex].name;
+            onTimeSegmentHover(label);
+        } else {
+            onTimeSegmentHover(null);
+        }
+    }
+  };
+
+  const handleMouseLeave = () => {
+      if(onTimeSegmentHover) {
+          onTimeSegmentHover(null);
+      }
+  };
+
   const TrendView = () => (
     <>
         {metricKeys.length > 1 && (
@@ -168,6 +186,8 @@ export const PerformanceGraph: React.FC<PerformanceGraphProps> = ({ metrics: dat
           <LineChart
             data={chartData}
             margin={{ top: 25, right: 20, left: -10, bottom: 5, }}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
           >
             <defs>
                 {metricKeys.map((key, index) => (

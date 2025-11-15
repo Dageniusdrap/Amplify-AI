@@ -3,8 +3,7 @@ import { FileUpload } from './components/FileUpload';
 import { ContentInput } from './components/ContentInput';
 import { Dashboard } from './components/Dashboard';
 import { Loader } from './components/Loader';
-import { AnalysisTypeSelector, AnalysisType } from './components/AnalysisTypeSelector';
-import { LogoIcon } from './components/icons/LogoIcon';
+import { SidebarNav, AnalysisType } from './components/SidebarNav';
 import {
   analyzeSalesCall,
   analyzeSocialMediaContent,
@@ -12,6 +11,8 @@ import {
   analyzeVideoContent,
   analyzeDocument,
   analyzeLiveStream,
+  analyzeFinancialReport,
+  transcribeVideo,
   generateImprovedContent,
   generateSocialPost,
   generateProductAd,
@@ -20,8 +21,8 @@ import {
   generateDescription,
   generateRetirementPlan,
 } from './services/geminiService';
-import type { AnalysisResult, AnalysisHistoryItem, User, RetirementPlan } from './types';
-import { MOCK_TRANSCRIPT } from './constants';
+import type { AnalysisResult, AnalysisHistoryItem, User, RetirementPlan, Notification } from './types';
+import { MOCK_ANALYSIS_RESULT } from './constants';
 import { GenerationView } from './components/GenerationView';
 import { BrandVoiceSetup } from './components/BrandVoiceSetup';
 import { PricingView } from './components/PricingView';
@@ -34,6 +35,10 @@ import { HistoryIcon } from './components/icons/HistoryIcon';
 import { OnboardingTour, OnboardingStep } from './components/OnboardingTour';
 import { Overlay } from './components/Overlay';
 import { RetirementPlanner } from './components/RetirementPlanner';
+import { LiveDebugger } from './components/LiveDebugger';
+import { WelcomeModal } from './components/WelcomeModal';
+import { NotificationContainer } from './components/Notification';
+import { QuestionMarkCircleIcon } from './components/icons/QuestionMarkCircleIcon';
 
 const useLocalStorage = <T,>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] => {
   const [storedValue, setStoredValue] = useState<T>(() => {
@@ -58,13 +63,22 @@ const useLocalStorage = <T,>(key: string, initialValue: T): [T, React.Dispatch<R
   return [storedValue, setValue];
 };
 
-const ONBOARDING_STEPS: OnboardingStep[] = [
-    { selector: '#analysis-type-selector', title: 'Choose Your Tool', content: 'Start by selecting what you want to do, from generating new content to analyzing existing sales calls, videos, and more.' },
-    { selector: '#analysis-input-area', title: 'Provide Your Content', content: 'Next, upload your file or paste your text here. This is the content Amplify AI will work with.' },
-    { selector: '#analysis-submit-button', title: 'Start the Magic', content: 'Click here to run the analysis or generation. The AI will process your content and provide actionable insights.' },
-    { selector: '#analysis-report-area', title: 'Review Your Results', content: 'Your detailed report will appear here, with feedback, transcripts, and performance metrics.' },
-    { selector: '#feedback-card-area', title: 'Get Actionable Feedback', content: 'The AI Feedback Card gives you clear strengths and opportunities. You can even generate new content based on this feedback!' },
-    { selector: '#user-menu-area', title: 'Manage Your Account', content: 'Access your analysis history, see your plan details, and manage your brand voice from this menu.' },
+const ANALYSIS_ONBOARDING_STEPS: OnboardingStep[] = [
+    { selector: '#analysis-type-selector', title: '1. Select Your Analysis Tool', content: 'Welcome to Creators Edge AI! Start by choosing what you want to analyze. From a viral video to a sales call or a new blog post, we have a specialized tool for it.' },
+    { selector: '#analysis-input-area', title: '2. Upload Your Content', content: 'Next, provide your content. You can upload a video or document, or simply paste in your text. The AI will handle the rest, including transcription.' },
+    { selector: '#analysis-submit-button', title: '3. Run the AI Analysis', content: 'Click here to let our AI co-pilot work its magic. It will perform a deep dive into your content to uncover actionable insights.' },
+    { selector: '#analysis-report-area', title: '4. Get Your Expert Report', content: 'Your comprehensive report appears here. It includes everything from performance graphs and scores to a full transcript of your media.' },
+    { selector: '#feedback-card-area', title: '5. Turn Insights into Action', content: 'The AI Coaching Card is your creative partner. It provides clear feedback and lets you instantly generate improved scripts, social posts, and more, all based on the analysis.' },
+    { selector: '#user-menu-area', title: '6. Manage Your Creative Hub', content: 'Your account menu lets you view past analyses, manage your brand voice, and check your plan details. Everything you need is right here.' },
+];
+
+const GENERATION_ONBOARDING_STEPS: OnboardingStep[] = [
+    { selector: '#generation-type-tabs', title: 'Choose Your Creation Tool', content: 'Start by selecting what you want to create, from a viral script to a full video.' },
+    { selector: '#prompt-textarea', title: 'Craft Your Prompt', content: 'This is where the magic begins. Describe your idea in detail. The more specific you are, the better the result!' },
+    { selector: '#generation-controls', title: 'Fine-Tune Your Creation', content: 'Each tool has powerful options. Adjust aspect ratios for images, select models for video, or choose a voice for speech generation.' },
+    { selector: '#generate-button', title: 'Bring Your Idea to Life', content: "When you're ready, click here to let the AI work its magic." },
+    { selector: '#generation-results-panel', title: 'Your Creation is Ready!', content: 'Your generated content will appear here. You can download it, edit it further, or use it as a base for another creation.' },
+    { selector: '#user-menu-area', title: 'Manage Your Account', content: 'You can also access your generation history, plan details, and brand voice from this menu.' },
 ];
 
 
@@ -74,15 +88,16 @@ const App: React.FC = () => {
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [contentInputs, setContentInputs] = useState({ script: '', description: '' });
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  
+  // Notification State
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
   // Generated Content State
   const [improvedContent, setImprovedContent] = useState<string | null>(null);
   const [isGeneratingImproved, setIsGeneratingImproved] = useState(false);
-  const [socialPost, setSocialPost] = useState<string | null>(null);
+  const [socialPost, setSocialPost] = useState<{ platform: 'X' | 'LinkedIn' | 'Instagram'; content: string } | null>(null);
   const [isGeneratingSocialPost, setIsGeneratingSocialPost] = useState(false);
   const [productAd, setProductAd] = useState<string | null>(null);
   const [isGeneratingProductAd, setIsGeneratingProductAd] = useState(false);
@@ -104,7 +119,12 @@ const App: React.FC = () => {
   const [hasCompletedTour, setHasCompletedTour] = useLocalStorage('hasCompletedTour', false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [overlayContent, setOverlayContent] = useState<React.ReactNode | null>(null);
+  const [highlightedTimeLabel, setHighlightedTimeLabel] = useState<string | null>(null);
   
+  // Sales call speaker roles
+  const [speakerARole, setSpeakerARole] = useState<'me' | 'client'>('me');
+  const [speakerBRole, setSpeakerBRole] = useState<'me' | 'client'>('client');
+
   // Auth State
   const [currentUser, setCurrentUser] = useLocalStorage<User | null>('currentUser', null);
   const [isAuthenticated, setIsAuthenticated] = useState(!!currentUser);
@@ -118,11 +138,8 @@ const App: React.FC = () => {
   useEffect(() => {
     if (currentUser) {
       setIsAuthenticated(true);
-      if (!hasCompletedTour) {
-        setShowOnboarding(true);
-      }
     }
-  }, [currentUser, hasCompletedTour]);
+  }, [currentUser]);
   
   // Cleanup object URLs
   useEffect(() => {
@@ -133,6 +150,17 @@ const App: React.FC = () => {
     };
   }, [fileUrl, feedbackAudio, scriptAudio]);
   
+  const addNotification = (message: string, type: 'success' | 'error' | 'info') => {
+    const id = Date.now();
+    // Prevent duplicate error messages
+    if (type === 'error' && notifications.some(n => n.message === message)) return;
+    setNotifications(prev => [...prev, { id, message, type }]);
+  };
+
+  const removeNotification = (id: number) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  };
+  
   const resetState = (newType?: AnalysisType) => {
     setSelectedFile(null);
     if (fileUrl) URL.revokeObjectURL(fileUrl);
@@ -142,8 +170,6 @@ const App: React.FC = () => {
     if (scriptAudio) URL.revokeObjectURL(scriptAudio.url);
     setScriptAudio(null);
     setContentInputs({ script: '', description: '' });
-    setError(null);
-    setUploadError(null);
     setAnalysisResult(null);
     setImprovedContent(null);
     setSocialPost(null);
@@ -151,6 +177,10 @@ const App: React.FC = () => {
     setKeyTakeaways(null);
     setGeneratedDescription(null);
     setRetirementPlan(null);
+    setHighlightedTimeLabel(null);
+    // Reset speaker roles to default
+    setSpeakerARole('me');
+    setSpeakerBRole('client');
     if(newType) setAnalysisType(newType);
   };
   
@@ -164,31 +194,33 @@ const App: React.FC = () => {
     const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
     
     const validFileTypes: Record<AnalysisType, string[]> = {
-        salesCall: ['audio/', 'video/'],
+        salesCall: ['audio/', 'video/', 'text/plain', 'text/markdown'],
         videoAnalysis: ['video/'],
+        videoToScript: ['video/'],
         liveStream: ['video/'],
         socialMedia: ['audio/', 'video/', 'image/'],
         productAd: ['audio/', 'video/', 'image/'],
         documentAnalysis: ['text/plain', 'application/pdf', 'text/markdown'],
+        financialReport: ['text/plain', 'application/pdf', 'text/markdown'],
         contentGeneration: [],
         brandVoice: [],
         pricing: [],
         retirementPlanner: [],
+        liveDebugger: [],
     };
 
     const isFileTypeValid = validFileTypes[analysisType]?.some(type => file.type.startsWith(type));
 
     if (!isFileTypeValid) {
-        setUploadError('Invalid file type for this analysis mode.');
+        addNotification('Invalid file type for this analysis mode.', 'error');
         return;
     }
 
     if (file.size > MAX_FILE_SIZE) {
-        setUploadError(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max size is 50MB.`);
+        addNotification(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max size is 50MB.`, 'error');
         return;
     }
 
-    setUploadError(null);
     setSelectedFile(file);
     if (fileUrl) {
       URL.revokeObjectURL(fileUrl);
@@ -196,7 +228,7 @@ const App: React.FC = () => {
     setFileUrl(URL.createObjectURL(file));
 
     // For document analysis, read the file content into the script input
-    if (analysisType === 'documentAnalysis' && file.type.startsWith('text/')) {
+    if ((analysisType === 'documentAnalysis' || analysisType === 'salesCall' || analysisType === 'financialReport') && file.type.startsWith('text/')) {
         const text = await file.text();
         setContentInputs(prev => ({ ...prev, script: text }));
     }
@@ -206,7 +238,6 @@ const App: React.FC = () => {
     if (fileUrl) URL.revokeObjectURL(fileUrl);
     setSelectedFile(null);
     setFileUrl(null);
-    setUploadError(null);
   };
 
   const handleCancel = () => {
@@ -219,16 +250,16 @@ const App: React.FC = () => {
     setIsGeneratingDescription(false);
     setIsGeneratingAudio(false);
     setIsGeneratingScriptAudio(false);
-    setError("Operation cancelled by user.");
+    setUploadProgress(null);
+    addNotification("Operation cancelled by user.", "info");
   };
 
   const handleAnalysisSubmit = async () => {
-    setUploadError(null);
     const hasFile = !!selectedFile;
     const hasText = !!contentInputs.script.trim() || !!contentInputs.description.trim();
 
     if (!hasFile && !hasText) {
-        setError('Please provide a file or some content to analyze.');
+        addNotification('Please provide a file or some content to analyze.', 'error');
         return;
     }
     
@@ -236,7 +267,7 @@ const App: React.FC = () => {
     
     cancelRequestRef.current = false;
     setIsLoading(true);
-    setError(null);
+    setUploadProgress(selectedFile ? 0 : null);
     setAnalysisResult(null);
     setImprovedContent(null);
     setSocialPost(null);
@@ -255,29 +286,40 @@ const App: React.FC = () => {
     try {
       let result: AnalysisResult;
       const file = selectedFile ?? undefined;
+      const progressCallback = (progress: number) => {
+        setUploadProgress(progress);
+      };
 
       switch (analysisType) {
         case 'salesCall':
-          if (!file) throw new Error("A file is required for Sales Call analysis.");
-          result = await analyzeSalesCall(file);
+          if (!file && !contentInputs.script.trim()) throw new Error("A file or script is required for Sales Call analysis.");
+          result = await analyzeSalesCall(contentInputs.script, brandVoice, file, progressCallback);
           break;
         case 'socialMedia':
-          result = await analyzeSocialMediaContent(contentInputs.script, contentInputs.description, file);
+          result = await analyzeSocialMediaContent(contentInputs.script, contentInputs.description, file, progressCallback);
           break;
         case 'productAd':
-          result = await analyzeProductAd(contentInputs.script, contentInputs.description, file);
+          result = await analyzeProductAd(contentInputs.script, contentInputs.description, file, progressCallback);
           break;
         case 'videoAnalysis':
             if (!file) throw new Error("A video file is required for Video analysis.");
-            result = await analyzeVideoContent(file);
+            result = await analyzeVideoContent(file, progressCallback);
+            break;
+        case 'videoToScript':
+            if (!file) throw new Error("A video file is required for Video to Script conversion.");
+            result = await transcribeVideo(file, progressCallback);
             break;
         case 'liveStream':
             if (!file) throw new Error("A video file is required for Live Stream analysis.");
-            result = await analyzeLiveStream(file);
+            result = await analyzeLiveStream(file, progressCallback);
             break;
         case 'documentAnalysis':
-            if (!hasText) throw new Error("Text content is required for Document analysis.");
-            result = await analyzeDocument(contentInputs.script, contentInputs.description);
+            if (!file && !contentInputs.script.trim()) throw new Error("A file or text content is required for Document analysis.");
+            result = await analyzeDocument(contentInputs.script, contentInputs.description, file, progressCallback);
+            break;
+        case 'financialReport':
+            if (!file && !contentInputs.script.trim()) throw new Error("A file or text content is required for Financial Report analysis.");
+            result = await analyzeFinancialReport(contentInputs.script, contentInputs.description, file, progressCallback);
             break;
         default:
           throw new Error("Invalid analysis type for submission.");
@@ -294,9 +336,10 @@ const App: React.FC = () => {
       onSuccessfulGeneration();
     } catch (err: any) {
       if (cancelRequestRef.current) return;
-      setError(err.message || 'An unexpected error occurred.');
+      addNotification(err.message || 'An unexpected error occurred.', 'error');
     } finally {
       setIsLoading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -305,7 +348,6 @@ const App: React.FC = () => {
     
     cancelRequestRef.current = false;
     setIsLoading(true);
-    setError(null);
     setRetirementPlan(null);
 
     try {
@@ -315,7 +357,7 @@ const App: React.FC = () => {
         onSuccessfulGeneration();
     } catch (err: any) {
         if (cancelRequestRef.current) return;
-        setError(err.message || 'An unexpected error occurred during plan generation.');
+        addNotification(err.message || 'An unexpected error occurred during plan generation.', 'error');
     } finally {
         setIsLoading(false);
     }
@@ -327,7 +369,6 @@ const App: React.FC = () => {
 
     cancelRequestRef.current = false;
     setIsGeneratingImproved(true);
-    setError(null);
     try {
       const content = await generateImprovedContent(analysisResult, brandVoice);
       if (cancelRequestRef.current) return;
@@ -335,27 +376,26 @@ const App: React.FC = () => {
       onSuccessfulGeneration();
     } catch (err: any) {
       if (cancelRequestRef.current) return;
-      setError(err.message || 'An unexpected error occurred during content generation.');
+      addNotification(err.message || 'An unexpected error occurred during content generation.', 'error');
     } finally {
       setIsGeneratingImproved(false);
     }
   };
   
-  const handleGenerateSocialPost = async () => {
+  const handleGenerateSocialPost = async (platform: 'X' | 'LinkedIn' | 'Instagram') => {
     if (!analysisResult) return;
     if(!attemptGeneration()) return;
 
     cancelRequestRef.current = false;
     setIsGeneratingSocialPost(true);
-    setError(null);
     try {
-        const post = await generateSocialPost(analysisResult);
+        const post = await generateSocialPost(analysisResult, platform);
         if (cancelRequestRef.current) return;
-        setSocialPost(post);
+        setSocialPost({ platform, content: post });
         onSuccessfulGeneration();
     } catch(err: any) {
         if (cancelRequestRef.current) return;
-        setError(err.message || 'An unexpected error occurred while generating the social post.');
+        addNotification(err.message || 'An unexpected error occurred while generating the social post.', 'error');
     } finally {
         setIsGeneratingSocialPost(false);
     }
@@ -367,7 +407,6 @@ const App: React.FC = () => {
     
     cancelRequestRef.current = false;
     setIsGeneratingProductAd(true);
-    setError(null);
     try {
         const ad = await generateProductAd(analysisResult);
         if (cancelRequestRef.current) return;
@@ -375,7 +414,7 @@ const App: React.FC = () => {
         onSuccessfulGeneration();
     } catch(err: any) {
         if (cancelRequestRef.current) return;
-        setError(err.message || 'An unexpected error occurred while generating the product ad.');
+        addNotification(err.message || 'An unexpected error occurred while generating the product ad.', 'error');
     } finally {
         setIsGeneratingProductAd(false);
     }
@@ -387,7 +426,6 @@ const App: React.FC = () => {
 
     cancelRequestRef.current = false;
     setIsGeneratingKeyTakeaways(true);
-    setError(null);
     try {
         const takeaways = await generateKeyTakeaways(analysisResult);
         if (cancelRequestRef.current) return;
@@ -395,7 +433,7 @@ const App: React.FC = () => {
         onSuccessfulGeneration();
     } catch(err: any) {
         if (cancelRequestRef.current) return;
-        setError(err.message || 'An unexpected error occurred while generating key takeaways.');
+        addNotification(err.message || 'An unexpected error occurred while generating key takeaways.', 'error');
     } finally {
         setIsGeneratingKeyTakeaways(false);
     }
@@ -407,7 +445,6 @@ const App: React.FC = () => {
 
     cancelRequestRef.current = false;
     setIsGeneratingDescription(true);
-    setError(null);
     try {
         const description = await generateDescription(analysisResult, brandVoice);
         if (cancelRequestRef.current) return;
@@ -415,7 +452,7 @@ const App: React.FC = () => {
         onSuccessfulGeneration();
     } catch(err: any) {
         if (cancelRequestRef.current) return;
-        setError(err.message || 'An unexpected error occurred while generating the description.');
+        addNotification(err.message || 'An unexpected error occurred while generating the description.', 'error');
     } finally {
         setIsGeneratingDescription(false);
     }
@@ -447,7 +484,7 @@ const App: React.FC = () => {
       onSuccessfulGeneration();
     } catch (err: any) {
       if (cancelRequestRef.current) return;
-      setError(err.message || 'Failed to generate audio feedback.');
+      addNotification(err.message || 'Failed to generate audio feedback.', 'error');
     } finally {
         setIsGeneratingAudio(false);
     }
@@ -473,7 +510,7 @@ const App: React.FC = () => {
       onSuccessfulGeneration();
     } catch (err: any) {
       if (cancelRequestRef.current) return;
-      setError(err.message || 'Failed to generate audio for the script.');
+      addNotification(err.message || 'Failed to generate audio for the script.', 'error');
     } finally {
         setIsGeneratingScriptAudio(false);
     }
@@ -522,7 +559,6 @@ const App: React.FC = () => {
   const handleLogin = (user: User) => {
     setCurrentUser(user);
     setHasCompletedTour(false); // Reset tour for new user
-    setShowOnboarding(true);
   };
   
   const handleSignup = (user: User) => {
@@ -539,47 +575,64 @@ const App: React.FC = () => {
     setIsAuthenticated(false);
     resetState('contentGeneration');
   };
+  
+  // --- Onboarding Handlers ---
+  const handleStartTour = () => {
+    setOverlayContent(null);
+    setShowOnboarding(true);
+  };
 
-  // MOCK: Load initial data for demo purposes
-  useEffect(() => {
-    if (isAuthenticated && isInitialLoad && analysisHistory.length === 0) {
-      setAnalysisResult({
-        transcript: MOCK_TRANSCRIPT,
-        performanceMetrics: [
-            { label: "Turn 1", scores: [{ metric: 'engagement', value: 6 }, { metric: 'clarity', value: 9 }, { metric: 'pacing', value: 7.5 }] },
-            { label: "Turn 2", scores: [{ metric: 'engagement', value: 2.5 }, { metric: 'clarity', value: 8.5 }, { metric: 'pacing', value: 8 }] },
-            { label: "Turn 3", scores: [{ metric: 'engagement', value: 8.5 }, { metric: 'clarity', value: 9.5 }, { metric: 'pacing', value: 7 }] },
-            { label: "Turn 4", scores: [{ metric: 'engagement', value: 9 }, { metric: 'clarity', value: 8 }, { metric: 'pacing', value: 8.5 }] },
-            { label: "Turn 5", scores: [{ metric: 'engagement', value: 9.5 }, { metric: 'clarity', value: 9.5 }, { metric: 'pacing', value: 7.5 }] }
-        ],
-        feedbackCard: {
-          strengths: ["Effectively overcame initial objections by pivoting to a relevant pain point (project visibility).", "Used a powerful data point (30% delay reduction) to build value.", "Maintained a confident and positive tone throughout the call."],
-          opportunities: ["Could have tried to discover more about the client's current system and its specific shortcomings earlier.", "The closing could be slightly stronger by confirming the value proposition one last time."]
-        }
-      });
-      setAnalysisType('salesCall');
-      setIsInitialLoad(false);
-    } else {
-        setIsInitialLoad(false);
-    }
-  }, [isInitialLoad, analysisHistory, isAuthenticated]);
-
+  const handleSkipOnboarding = () => {
+    setOverlayContent(null);
+    setHasCompletedTour(true);
+  };
+  
   const handleOnboardingFinish = () => {
     setHasCompletedTour(true);
     setShowOnboarding(false);
   };
+
+  // Set initial view and trigger onboarding
+  useEffect(() => {
+    if (isAuthenticated) {
+      if (!hasCompletedTour && !showOnboarding) {
+        // Show Welcome Modal before the tour
+        setOverlayContent(
+          <WelcomeModal 
+            onStartTour={handleStartTour} 
+            onSkip={handleSkipOnboarding}
+          />);
+      }
+    } else {
+      resetState('contentGeneration');
+      // Clear welcome modal if user logs out
+      if (overlayContent?.type === WelcomeModal) {
+          setOverlayContent(null);
+      }
+    }
+  }, [isAuthenticated, hasCompletedTour]);
+
+
   
   const renderContent = () => {
     if (!isAuthenticated) {
-        return <AuthView onLogin={handleLogin} onSignup={handleSignup} />;
+        return (
+          <div className="flex items-center justify-center min-h-full">
+            <AuthView onLogin={handleLogin} onSignup={handleSignup} />
+          </div>
+        );
     }
     if (!currentUser?.activated) {
-        return <ActivationView user={currentUser} onActivationSuccess={handleActivation} />;
+        return (
+          <div className="flex items-center justify-center min-h-full">
+            <ActivationView user={currentUser} onActivationSuccess={handleActivation} />
+          </div>
+        );
     }
     
     const analysisInputView = () => {
-        const fileUploadTypes: AnalysisType[] = ['salesCall', 'videoAnalysis', 'liveStream'];
-        const contentInputTypes: AnalysisType[] = ['socialMedia', 'productAd', 'documentAnalysis'];
+        const fileUploadTypes: AnalysisType[] = ['videoAnalysis', 'liveStream', 'videoToScript'];
+        const contentInputTypes: AnalysisType[] = ['salesCall', 'socialMedia', 'productAd', 'documentAnalysis', 'financialReport'];
 
         if (fileUploadTypes.includes(analysisType)) {
             return (
@@ -591,7 +644,6 @@ const App: React.FC = () => {
                         isLoading={isLoading}
                         selectedFile={selectedFile}
                         fileUrl={fileUrl}
-                        error={uploadError}
                         analysisType={analysisType}
                     />
                 </div>
@@ -608,6 +660,7 @@ const App: React.FC = () => {
                         onFileSelect={handleFileSelect}
                         selectedFile={selectedFile}
                         analysisType={analysisType}
+                        onClearFile={handleClearFile}
                      />
                  </div>
             );
@@ -616,23 +669,24 @@ const App: React.FC = () => {
     };
     
     if (analysisType === 'contentGeneration') {
-      return <div id="analysis-input-area"><GenerationView brandVoice={brandVoice} onAttemptGenerate={attemptGeneration} onSuccessfulGeneration={onSuccessfulGeneration} initialScript={initialGenerationScript} onScriptConsumed={() => setInitialGenerationScript(null)} /></div>;
+      return <div id="analysis-input-area" className="w-full"><GenerationView brandVoice={brandVoice} onAttemptGenerate={attemptGeneration} onSuccessfulGeneration={onSuccessfulGeneration} initialScript={initialGenerationScript} onScriptConsumed={() => setInitialGenerationScript(null)} addNotification={addNotification} /></div>;
     }
     if (analysisType === 'brandVoice') {
-      return <div id="analysis-input-area" className="max-w-lg mx-auto"><BrandVoiceSetup currentVoice={brandVoice} onSave={setBrandVoice} /></div>;
+      return <div id="analysis-input-area" className="w-full max-w-lg mx-auto"><BrandVoiceSetup currentVoice={brandVoice} onSave={setBrandVoice} /></div>;
     }
     if (analysisType === 'pricing') {
-      return <div id="analysis-input-area"><PricingView currentPlan={currentUser!.plan} onApplyPromoCode={(code) => console.log(code)} /></div>;
+      return <div id="analysis-input-area" className="w-full"><PricingView currentPlan={currentUser!.plan} onApplyPromoCode={(code) => console.log(code)} /></div>;
     }
      if (analysisType === 'retirementPlanner') {
-      return <div id="analysis-input-area" className="max-w-7xl mx-auto"><RetirementPlanner onGenerate={handleGenerateRetirementPlan} isLoading={isLoading} error={error} plan={retirementPlan} onCancel={handleCancel} /></div>;
+      return <div id="analysis-input-area" className="w-full"><RetirementPlanner onGenerate={handleGenerateRetirementPlan} isLoading={isLoading} plan={retirementPlan} onCancel={handleCancel} /></div>;
+    }
+    if (analysisType === 'liveDebugger') {
+        return <div id="analysis-input-area" className="w-full"><LiveDebugger /></div>;
     }
 
     return (
-      <>
-        {error ? (
-          <div className="text-center p-4 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg">{error}</div>
-        ) : analysisResult ? (
+      <div className="w-full">
+        {analysisResult ? (
           <Dashboard
             result={analysisResult}
             isGeneratingImproved={isGeneratingImproved}
@@ -661,60 +715,94 @@ const App: React.FC = () => {
             isGeneratingScriptAudio={isGeneratingScriptAudio}
             scriptAudio={scriptAudio}
             onCancel={handleCancel}
+            highlightedTimeLabel={highlightedTimeLabel}
+            onTimeSegmentHover={setHighlightedTimeLabel}
+            speakerARole={speakerARole}
+            speakerBRole={speakerBRole}
+            onSpeakerARoleChange={setSpeakerARole}
+            onSpeakerBRoleChange={setSpeakerBRole}
           />
         ) : (
-          analysisInputView()
+          <div className="flex items-center justify-center min-h-full pt-16">
+            {analysisInputView()}
+          </div>
         )}
-      </>
+      </div>
     );
   };
+  
+  const isGenerationView = analysisType === 'contentGeneration';
+  const tourSteps = isGenerationView ? GENERATION_ONBOARDING_STEPS : ANALYSIS_ONBOARDING_STEPS;
+  
+  const currentToolConfig = SidebarNav.toolConfig[analysisType];
+  const loaderMessage = "Analyzing your content...";
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans">
+    <div className="min-h-screen text-gray-900 dark:text-gray-100 font-sans flex">
+        <NotificationContainer notifications={notifications} onDismiss={removeNotification} />
         {isLoading && (
             <Overlay>
-                <Loader message="Analyzing your content..." onCancel={handleCancel} />
+                <Loader message={loaderMessage} onCancel={handleCancel} progress={uploadProgress} />
             </Overlay>
         )}
         {overlayContent && <Overlay>{overlayContent}</Overlay>}
         {isAuthenticated && showOnboarding && (
-            <OnboardingTour steps={ONBOARDING_STEPS} onFinish={handleOnboardingFinish} />
+            <OnboardingTour steps={tourSteps} onFinish={handleOnboardingFinish} />
         )}
-        <header className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky top-0 z-40 border-b border-gray-200 dark:border-gray-700">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex justify-between items-center h-16">
-                    <div className="flex items-center">
-                        <LogoIcon className="h-16 w-auto" />
-                    </div>
-                    {isAuthenticated && currentUser && (
-                         <div id="user-menu-area" className="flex items-center space-x-4">
-                            <span className="text-sm font-medium hidden sm:inline">
-                                Welcome, {currentUser.name || currentUser.email.split('@')[0]}!
+        
+        {isAuthenticated && (
+            <SidebarNav selectedType={analysisType} onTypeChange={handleTypeChange} />
+        )}
+        
+        <div className="flex-1 flex flex-col">
+            <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+                {!isAuthenticated ? (
+                  renderContent()
+                ) : (
+                  <>
+                    <header className="flex justify-between items-center mb-8 p-4 bg-black/10 backdrop-blur-lg rounded-xl border border-white/10">
+                       <div>
+                         {currentToolConfig && (
+                           <>
+                             <h1 className="text-2xl font-bold text-white">{currentToolConfig.label}</h1>
+                             <p className="text-sm text-gray-300 mt-1">{currentToolConfig.description}</p>
+                           </>
+                         )}
+                       </div>
+                       {currentUser && (
+                         <div id="user-menu-area" className="flex items-center space-x-2 sm:space-x-4">
+                            <span className="text-sm font-medium hidden sm:inline text-white">
+                                {currentUser.name || currentUser.email.split('@')[0]}
                             </span>
                              <button
+                                onClick={() => setShowOnboarding(true)}
+                                className="p-2 rounded-full text-white hover:bg-white/20"
+                                aria-label="Start tour"
+                            >
+                                <QuestionMarkCircleIcon className="h-6 w-6" />
+                            </button>
+                             <button
                                 onClick={() => setIsHistoryOpen(true)}
-                                className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700"
+                                className="p-2 rounded-full text-white hover:bg-white/20"
                                 aria-label="View history"
                             >
                                 <HistoryIcon className="h-6 w-6" />
                             </button>
                             <button
                                 onClick={handleLogout}
-                                className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700"
+                                className="p-2 rounded-full text-white hover:bg-white/20"
                                 aria-label="Logout"
                             >
                                 <LogoutIcon className="h-6 w-6" />
                             </button>
                         </div>
-                    )}
-                </div>
-            </div>
-        </header>
-
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-             {isAuthenticated && <AnalysisTypeSelector selectedType={analysisType} onTypeChange={handleTypeChange} />}
-            {renderContent()}
-        </main>
+                       )}
+                    </header>
+                    {renderContent()}
+                  </>
+                )}
+            </main>
+        </div>
         
         <AnalysisHistoryModal 
             isOpen={isHistoryOpen}

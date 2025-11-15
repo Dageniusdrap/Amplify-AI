@@ -38,6 +38,7 @@ export const BrandVoiceSetup: React.FC<BrandVoiceSetupProps> = ({ currentVoice, 
   const [audience, setAudience] = useState('');
   const [example, setExample] = useState('');
   const [isSaved, setIsSaved] = useState(false);
+  const [errors, setErrors] = useState<{ tone?: boolean; audience?: boolean; example?: boolean }>({});
 
   useEffect(() => {
     const { tone, audience, example } = parseVoice(currentVoice);
@@ -55,6 +56,17 @@ export const BrandVoiceSetup: React.FC<BrandVoiceSetupProps> = ({ currentVoice, 
   }, [tone, audience, example]);
 
   const handleSave = () => {
+    const newErrors: { tone?: boolean; audience?: boolean; example?: boolean } = {};
+    if (!tone.trim()) newErrors.tone = true;
+    if (!audience.trim()) newErrors.audience = true;
+    if (!example.trim()) newErrors.example = true;
+    
+    setErrors(newErrors);
+    
+    if (Object.keys(newErrors).length > 0) {
+        return;
+    }
+
     onSave(constructedVoice);
     setIsSaved(true);
     setTimeout(() => {
@@ -66,6 +78,7 @@ export const BrandVoiceSetup: React.FC<BrandVoiceSetupProps> = ({ currentVoice, 
     setTone(preset.tone);
     setAudience(preset.audience);
     setExample(preset.example);
+    setErrors({});
   };
 
   return (
@@ -109,7 +122,7 @@ export const BrandVoiceSetup: React.FC<BrandVoiceSetupProps> = ({ currentVoice, 
             <input
                 id="brand-tone"
                 type="text"
-                className="block w-full px-3 py-2 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm"
+                className={`block w-full px-3 py-2 bg-white dark:bg-gray-700/50 border rounded-md shadow-sm focus:outline-none ${errors.tone ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 dark:border-gray-600 focus:ring-indigo-500 focus:border-indigo-500'}`}
                 placeholder="e.g., Witty, engaging, humorous"
                 value={tone}
                 onChange={(e) => setTone(e.target.value)}
@@ -130,7 +143,7 @@ export const BrandVoiceSetup: React.FC<BrandVoiceSetupProps> = ({ currentVoice, 
             <input
                 id="brand-audience"
                 type="text"
-                className="block w-full px-3 py-2 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm"
+                className={`block w-full px-3 py-2 bg-white dark:bg-gray-700/50 border rounded-md shadow-sm focus:outline-none ${errors.audience ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 dark:border-gray-600 focus:ring-indigo-500 focus:border-indigo-500'}`}
                 placeholder="e.g., Tech-savvy millennials, C-level executives"
                 value={audience}
                 onChange={(e) => setAudience(e.target.value)}
@@ -151,7 +164,7 @@ export const BrandVoiceSetup: React.FC<BrandVoiceSetupProps> = ({ currentVoice, 
             <textarea
                 id="brand-example"
                 rows={3}
-                className="block w-full px-3 py-2 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm"
+                className={`block w-full px-3 py-2 bg-white dark:bg-gray-700/50 border rounded-md shadow-sm focus:outline-none ${errors.example ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 dark:border-gray-600 focus:ring-indigo-500 focus:border-indigo-500'}`}
                 placeholder="e.g., 'You thought your last phone was smart? This one went to grad school.'"
                 value={example}
                 onChange={(e) => setExample(e.target.value)}
@@ -175,11 +188,12 @@ export const BrandVoiceSetup: React.FC<BrandVoiceSetupProps> = ({ currentVoice, 
             <p className="text-sm font-semibold">AI Prompt Preview:</p>
             <p className="text-xs italic mt-1">{constructedVoice || "Your generated prompt will appear here..."}</p>
         </div>
+        
+        {Object.keys(errors).length > 0 && <p className="text-sm text-center text-red-600 dark:text-red-400">Please fill out all highlighted fields to define your brand voice.</p>}
 
       <button
         onClick={handleSave}
-        disabled={!constructedVoice.trim()}
-        className="w-full inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200 disabled:bg-indigo-300 dark:disabled:bg-indigo-800"
+        className="w-full inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200"
       >
         {isSaved ? <CheckIcon className="h-5 w-5 mr-2" /> : null}
         {isSaved ? 'Brand Voice Saved!' : 'Save Brand Voice'}

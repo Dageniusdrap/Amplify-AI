@@ -16,6 +16,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin, onSignup }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleSocialLogin = (socialUser: User) => {
     // In a real app, this would trigger an OAuth flow.
@@ -25,14 +26,17 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin, onSignup }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (mode === 'login') {
-      // Mock login - in a real app, this would be a server call
-      const isOwner = email === 'owner@amplify.ai';
-      onLogin({ email, plan: isOwner ? 'Pro' : 'Free', role: isOwner ? 'owner' : 'user', activated: true, name: isOwner ? 'Admin' : 'Test User' });
-    } else {
-      // Mock signup
-      onSignup({ email, name, plan: 'Free', role: 'user' });
-    }
+    setIsLoading(true);
+    // Simulate network delay
+    setTimeout(() => {
+        if (mode === 'login') {
+            const isOwner = email === 'owner@creatorsedge.ai';
+            onLogin({ email, plan: isOwner ? 'Pro' : 'Free', role: isOwner ? 'owner' : 'user', activated: true, name: isOwner ? 'Admin' : 'Test User' });
+        } else {
+            onSignup({ email, name, plan: 'Free', role: 'user' });
+        }
+        // No need to setIsLoading(false) as the component will unmount
+    }, 1000);
   };
 
   return (
@@ -70,8 +74,12 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin, onSignup }) => {
             </div>
 
             <div>
-                <button type="submit" className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">
-                     {mode === 'login' ? 'Sign In' : 'Create Account'}
+                <button 
+                    type="submit" 
+                    disabled={isLoading}
+                    className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400"
+                >
+                     {isLoading ? 'Processing...' : (mode === 'login' ? 'Sign In' : 'Create Account')}
                 </button>
             </div>
         </form>

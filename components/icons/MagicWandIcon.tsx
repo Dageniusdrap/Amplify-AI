@@ -1,4 +1,3 @@
-// FIX: Created file content to resolve module not found error.
 import React from 'react';
 
 export const MagicWandIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (

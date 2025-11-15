@@ -10,7 +10,6 @@ import { XIcon } from './icons/XIcon';
 interface RetirementPlannerProps {
     onGenerate: (inputs: any) => void;
     isLoading: boolean;
-    error: string | null;
     plan: RetirementPlan | null;
     onCancel: () => void;
 }
@@ -24,7 +23,7 @@ const formatCurrency = (value: number) => {
     }).format(value);
 };
 
-export const RetirementPlanner: React.FC<RetirementPlannerProps> = ({ onGenerate, isLoading, error, plan, onCancel }) => {
+export const RetirementPlanner: React.FC<RetirementPlannerProps> = ({ onGenerate, isLoading, plan, onCancel }) => {
     const [inputs, setInputs] = useState({
         currentAge: 30,
         retirementAge: 65,
@@ -44,7 +43,7 @@ export const RetirementPlanner: React.FC<RetirementPlannerProps> = ({ onGenerate
         onGenerate(inputs);
     };
 
-    const InputField: React.FC<{ label: string, name: string, type: string, value: any, prefix?: string }> = ({ label, name, type, value, prefix }) => (
+    const InputField: React.FC<{ label: string, name: string, type: string, value: any, prefix?: string, [key: string]: any }> = ({ label, name, type, value, prefix, ...rest }) => (
         <div>
             <label htmlFor={name} className="block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>
             <div className="mt-1 relative rounded-md shadow-sm">
@@ -56,6 +55,7 @@ export const RetirementPlanner: React.FC<RetirementPlannerProps> = ({ onGenerate
                     value={value}
                     onChange={handleInputChange}
                     className={`block w-full rounded-md border-gray-300 bg-white dark:bg-gray-700/50 dark:border-gray-600 focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm ${prefix ? 'pl-7' : 'pl-3'}`}
+                    {...rest}
                 />
             </div>
         </div>
@@ -65,10 +65,6 @@ export const RetirementPlanner: React.FC<RetirementPlannerProps> = ({ onGenerate
         return <Loader message="Generating your retirement plan..." onCancel={onCancel} />;
     }
     
-    if(error) {
-        return <div className="text-center p-4 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg">{error}</div>;
-    }
-
     if (plan) {
         return (
             <div className="space-y-8">
@@ -150,11 +146,11 @@ export const RetirementPlanner: React.FC<RetirementPlannerProps> = ({ onGenerate
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                    <InputField label="Current Age" name="currentAge" type="number" value={inputs.currentAge} />
-                    <InputField label="Retirement Age" name="retirementAge" type="number" value={inputs.retirementAge} />
+                    <InputField label="Current Age" name="currentAge" type="number" value={inputs.currentAge} min="18" max="100" />
+                    <InputField label="Retirement Age" name="retirementAge" type="number" value={inputs.retirementAge} min={inputs.currentAge > 0 ? inputs.currentAge + 1 : 18} max="120" />
                 </div>
-                <InputField label="Current Savings" name="currentSavings" type="number" value={inputs.currentSavings} prefix="$" />
-                <InputField label="Monthly Contribution" name="monthlyContribution" type="number" value={inputs.monthlyContribution} prefix="$" />
+                <InputField label="Current Savings" name="currentSavings" type="number" value={inputs.currentSavings} prefix="$" min="0" />
+                <InputField label="Monthly Contribution" name="monthlyContribution" type="number" value={inputs.monthlyContribution} prefix="$" min="0" />
                  <div>
                     <label htmlFor="investmentStyle" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Investment Style</label>
                     <select id="investmentStyle" name="investmentStyle" value={inputs.investmentStyle} onChange={handleInputChange} className="mt-1 block w-full rounded-md border-gray-300 bg-white dark:bg-gray-700/50 dark:border-gray-600 py-2 pl-3 pr-10 text-base focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm">
@@ -163,7 +159,7 @@ export const RetirementPlanner: React.FC<RetirementPlannerProps> = ({ onGenerate
                         <option>Aggressive</option>
                     </select>
                 </div>
-                <InputField label="Desired Monthly Retirement Income" name="retirementIncome" type="number" value={inputs.retirementIncome} prefix="$" />
+                <InputField label="Desired Monthly Retirement Income" name="retirementIncome" type="number" value={inputs.retirementIncome} prefix="$" min="0" />
 
                 <button
                     id="analysis-submit-button"

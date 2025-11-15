@@ -3,29 +3,14 @@ import { XIcon } from './icons/XIcon';
 import { TrashIcon } from './icons/TrashIcon';
 import { SearchIcon } from './icons/SearchIcon';
 import { ClockIcon } from './icons/ClockIcon';
-import type { VoiceoverScript } from '../types';
+import type { VoiceoverScript, PromptHistoryItem } from '../types';
 import { MagicWandIcon } from './icons/MagicWandIcon';
 import { ImageIcon } from './icons/ImageIcon';
 import { VideoCameraIcon } from './icons/VideoCameraIcon';
 import { SpeakerWaveIcon } from './icons/SpeakerWaveIcon';
+import { ChevronDownIcon } from './icons/ChevronDownIcon';
 
-export interface PromptHistoryItem {
-  prompt: string;
-  timestamp: string;
-  type: 'script' | 'image' | 'video' | 'speech';
-  link?: string;
-  imageModel?: 'imagen-4.0-generate-001' | 'gemini-2.5-flash-image';
-  aspectRatio?: string;
-  imageStylePresets?: string[];
-  imageMimeType?: 'image/jpeg' | 'image/png';
-  videoModel?: 'veo-3.1-fast-generate-preview' | 'veo-3.1-generate-preview';
-  resolution?: '720p' | '1080p';
-  videoDuration?: 'short' | 'medium' | 'long';
-  videoStylePresets?: string[];
-  referenceFrameCount?: number;
-  voiceoverScripts?: VoiceoverScript[];
-  voice?: string;
-}
+export type { PromptHistoryItem };
 
 interface PromptHistoryModalProps {
   isOpen: boolean;
@@ -59,15 +44,29 @@ const HistoryTag: React.FC<{ children: React.ReactNode, className?: string }> = 
 
 export const PromptHistoryModal: React.FC<PromptHistoryModalProps> = ({ isOpen, onClose, history, onSelect, onClear, onDelete }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [filter, setFilter] = useState<PromptHistoryItem['type'] | 'all'>('all');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
 
   const filteredHistory = useMemo(() => {
-    if (!searchQuery) return history;
+    let items = [...history]; // Create a copy to sort
+
+    // Sort items
+    items.sort((a, b) => {
+      const dateA = new Date(a.timestamp).getTime();
+      const dateB = new Date(b.timestamp).getTime();
+      return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
+    });
+
+    if (filter !== 'all') {
+        items = items.filter(item => item.type === filter);
+    }
+    if (!searchQuery) return items;
     const lowercasedQuery = searchQuery.toLowerCase();
-    return history.filter(item =>
+    return items.filter(item =>
       item.prompt.toLowerCase().includes(lowercasedQuery) ||
       (item.link && item.link.toLowerCase().includes(lowercasedQuery))
     );
-  }, [history, searchQuery]);
+  }, [history, searchQuery, filter, sortOrder]);
 
   if (!isOpen) return null;
   
@@ -79,6 +78,8 @@ export const PromptHistoryModal: React.FC<PromptHistoryModalProps> = ({ isOpen, 
       minute: '2-digit'
     });
   };
+
+  const availableFilters = ['script', 'image', 'video', 'speech'] as const;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -112,6 +113,36 @@ export const PromptHistoryModal: React.FC<PromptHistoryModalProps> = ({ isOpen, 
             />
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <SearchIcon className="h-5 w-5 text-gray-400" />
+            </div>
+          </div>
+          <div className="flex justify-between items-center mt-3">
+            <div className="flex flex-wrap gap-2">
+                <button
+                    onClick={() => setFilter('all')}
+                    className={`px-3 py-1 text-xs font-medium rounded-full ${filter === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}
+                >
+                    All
+                </button>
+                {availableFilters.map(type => (
+                    <button
+                        key={type}
+                        onClick={() => setFilter(type)}
+                        className={`px-3 py-1 text-xs font-medium rounded-full capitalize ${filter === type ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}
+                    >
+                        {type}
+                    </button>
+                ))}
+            </div>
+             <div className="relative">
+                <select
+                    value={sortOrder}
+                    onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
+                    className="text-xs font-medium appearance-none bg-gray-200 dark:bg-gray-700 border-none rounded-full py-1 pl-3 pr-8 focus:ring-2 focus:ring-indigo-500"
+                >
+                    <option value="newest">Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                </select>
+                <ChevronDownIcon className="h-4 w-4 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500 dark:text-gray-400" />
             </div>
           </div>
         </div>
@@ -148,7 +179,7 @@ export const PromptHistoryModal: React.FC<PromptHistoryModalProps> = ({ isOpen, 
                                 {item.voice && <HistoryTag>{item.voice}</HistoryTag>}
                                 {item.aspectRatio && <HistoryTag>{item.aspectRatio}</HistoryTag>}
                                 {item.resolution && <HistoryTag>{item.resolution}</HistoryTag>}
-                                {item.videoDuration && <HistoryTag className="capitalize">{item.videoDuration}</HistoryTag>}
+                                {item.videoDuration && <HistoryTag>{item.videoDuration}s</HistoryTag>}
                                 {item.referenceFrameCount && item.referenceFrameCount > 0 && <HistoryTag>{item.referenceFrameCount} Ref Img</HistoryTag>}
                                 {item.imageStylePresets && item.imageStylePresets.length > 0 && <HistoryTag className="truncate max-w-[200px]">{item.imageStylePresets.join(', ')}</HistoryTag>}
                                 {item.videoStylePresets && item.videoStylePresets.length > 0 && <HistoryTag className="truncate max-w-[200px]">{item.videoStylePresets.join(', ')}</HistoryTag>}

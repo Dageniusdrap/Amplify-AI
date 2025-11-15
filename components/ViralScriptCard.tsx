@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import type { ViralScript } from '../types';
+import type { ViralScript, VoiceoverScript } from '../types';
 import { VideoCameraIcon } from './icons/VideoCameraIcon';
 import { ChevronDownIcon } from './icons/ChevronDownIcon';
 import { ShareIcon } from './icons/ShareIcon';
@@ -67,8 +67,41 @@ export const ViralScriptCard: React.FC<ViralScriptCardProps> = ({
 }) => {
     const { titles, description, tags, thumbnailConcepts, script, storyboard, monetization, socialPost } = scriptData;
     const audioRef = useRef<HTMLAudioElement>(null);
-    const [deliveryVoice, setDeliveryVoice] = useState(PROFESSIONAL_VOICES[0]);
+    const [voiceoverScripts, setVoiceoverScripts] = useState<VoiceoverScript[]>([]);
     const [voiceStyle, setVoiceStyle] = useState(VOICE_STYLES[0]);
+
+    useEffect(() => {
+        // Parse script for speakers
+        const speakerRegex = /^([A-Z0-9\s]+):/gm;
+        const matches = [...script.matchAll(speakerRegex)];
+        const speakerNames = [...new Set(matches.map(m => m[1].trim()))].slice(0, 2);
+        
+        if (speakerNames.length > 1) {
+            // Multi-speaker script
+            const scriptsBySpeaker: Record<string, string[]> = {};
+            speakerNames.forEach(name => scriptsBySpeaker[name] = []);
+            let currentSpeaker = '';
+            script.split('\n').forEach(line => {
+                const speakerMatch = line.match(/^([A-Z0-9\s]+):/);
+                if (speakerMatch && speakerNames.includes(speakerMatch[1].trim())) {
+                    currentSpeaker = speakerMatch[1].trim();
+                    scriptsBySpeaker[currentSpeaker].push(line.substring(speakerMatch[0].length).trim());
+                } else if (currentSpeaker && line.trim()) {
+                    scriptsBySpeaker[currentSpeaker].push(line.trim());
+                }
+            });
+            setVoiceoverScripts(speakerNames.map((name, index) => ({
+                id: index + 1,
+                speaker: name,
+                script: scriptsBySpeaker[name].join(' '),
+                voice: PROFESSIONAL_VOICES[index % PROFESSIONAL_VOICES.length]
+            })));
+        } else {
+            // Single speaker script
+            setVoiceoverScripts([{ id: 1, speaker: 'Narrator', script: script, voice: PROFESSIONAL_VOICES[0] }]);
+        }
+
+    }, [script]);
     
     useEffect(() => {
         if (scriptAudio?.url && audioRef.current) {
@@ -77,7 +110,13 @@ export const ViralScriptCard: React.FC<ViralScriptCardProps> = ({
     }, [scriptAudio]);
     
     const handleListenClick = async () => {
-        await onListenToScript(script, deliveryVoice, voiceStyle);
+        if (voiceoverScripts.length > 1) {
+            // This would call a new prop if we were to implement multi-speaker from here
+            // For now, we'll just synthesize the whole script with one voice.
+            await onListenToScript(script, voiceoverScripts[0].voice, voiceStyle);
+        } else {
+            await onListenToScript(voiceoverScripts[0].script, voiceoverScripts[0].voice, voiceStyle);
+        }
     };
 
     const handleDownloadBlueprint = () => {
@@ -91,6 +130,12 @@ export const ViralScriptCard: React.FC<ViralScriptCardProps> = ({
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    };
+    
+    const updateVoiceoverScript = (id: number, updated: Partial<VoiceoverScript>) => {
+        setVoiceoverScripts(voiceoverScripts.map(vs =>
+            vs.id === id ? { ...vs, ...updated } : vs
+        ));
     };
 
     return (
@@ -186,22 +231,40 @@ export const ViralScriptCard: React.FC<ViralScriptCardProps> = ({
                                     </button>
                                 )}
                             </div>
-                            <div className="grid grid-cols-2 gap-2">
-                                <select 
-                                    value={deliveryVoice}
-                                    onChange={(e) => setDeliveryVoice(e.target.value)}
-                                    className="w-full p-2 text-sm bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                                >
-                                    {PROFESSIONAL_VOICES.map(voice => <option key={voice} value={voice}>{voice}</option>)}
-                                </select>
-                                <select 
-                                    value={voiceStyle}
-                                    onChange={(e) => setVoiceStyle(e.target.value)}
-                                    className="w-full p-2 text-sm bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                                >
-                                    {VOICE_STYLES.map(style => <option key={style} value={style}>{style}</option>)}
-                                </select>
-                            </div>
+                            {voiceoverScripts.length > 1 ? (
+                                <div className="space-y-3">
+                                     <p className="text-xs text-gray-500">Multi-speaker audio generation is now available in the main "Video" generation tab. This preview uses a single voice.</p>
+                                    {voiceoverScripts.map(vs => (
+                                        <div key={vs.id} className="grid grid-cols-2 gap-2 items-center">
+                                            <span className="text-sm font-semibold truncate">{vs.speaker}</span>
+                                            <select
+                                                value={vs.voice}
+                                                onChange={e => updateVoiceoverScript(vs.id, { voice: e.target.value })}
+                                                className="w-full p-2 text-sm bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                                            >
+                                                {PROFESSIONAL_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
+                                            </select>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-2">
+                                    <select 
+                                        value={voiceoverScripts[0]?.voice || PROFESSIONAL_VOICES[0]}
+                                        onChange={(e) => updateVoiceoverScript(1, { voice: e.target.value })}
+                                        className="w-full p-2 text-sm bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                                    >
+                                        {PROFESSIONAL_VOICES.map(voice => <option key={voice} value={voice}>{voice}</option>)}
+                                    </select>
+                                    <select 
+                                        value={voiceStyle}
+                                        onChange={(e) => setVoiceStyle(e.target.value)}
+                                        className="w-full p-2 text-sm bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                                    >
+                                        {VOICE_STYLES.map(style => <option key={style} value={style}>{style}</option>)}
+                                    </select>
+                                </div>
+                            )}
                             {scriptAudio?.url && (
                                 <div className="pt-2 flex items-center gap-2">
                                     <audio ref={audioRef} src={scriptAudio.url} controls className="w-full" />

@@ -6,7 +6,9 @@ import { ClockIcon } from './icons/ClockIcon';
 import { UploadIcon } from './icons/UploadIcon';
 import { XIcon } from './icons/XIcon';
 import { Loader } from './Loader';
-import { PromptHistoryModal, PromptHistoryItem } from './PromptHistoryModal';
+// FIX: Imported PromptHistoryItem type to resolve compilation errors.
+import { PromptHistoryModal, type PromptHistoryItem } from './PromptHistoryModal';
+import { PromptTemplatesModal } from './PromptTemplatesModal';
 import { 
     generateViralScript, 
     generateImage, 
@@ -16,6 +18,7 @@ import {
     generateSocialPostFromScript,
     generateSpeechFromText,
     editImage,
+    validateApiKey,
 } from '../services/geminiService';
 import { pcmToMp3Blob, decode } from '../utils/audio';
 import { exportScriptAsSrt } from '../utils/export';
@@ -28,6 +31,9 @@ import { ClosedCaptionIcon } from './icons/ClosedCaptionIcon';
 import { PlusCircleIcon } from './icons/PlusCircleIcon';
 import { PencilIcon } from './icons/PencilIcon';
 import { CameraIcon } from './icons/CameraIcon';
+import { CheckIcon } from './icons/CheckIcon';
+import { KeyIcon } from './icons/KeyIcon';
+import { SparklesIcon } from './icons/SparklesIcon';
 
 
 interface GenerationViewProps {
@@ -36,13 +42,13 @@ interface GenerationViewProps {
   onSuccessfulGeneration: () => void;
   initialScript?: string | null;
   onScriptConsumed: () => void;
+  addNotification: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
 type GenerationType = 'script' | 'image' | 'video' | 'speech';
 type ImageAspectRatio = '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
 type VideoAspectRatio = '16:9' | '9:16';
 type VideoResolution = '720p' | '1080p';
-type VideoDuration = 'short' | 'medium' | 'long';
 type ImageModel = 'imagen-4.0-generate-001' | 'gemini-2.5-flash-image';
 type VideoModel = 'veo-3.1-fast-generate-preview' | 'veo-3.1-generate-preview';
 type ImageMimeType = 'image/jpeg' | 'image/png';
@@ -70,6 +76,29 @@ const useLocalStorage = <T,>(key: string, initialValue: T): [T, React.Dispatch<R
   return [storedValue, setValue];
 };
 
+const useSessionStorage = <T,>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] => {
+  const [storedValue, setStoredValue] = useState<T>(() => {
+    try {
+      const item = window.sessionStorage.getItem(key);
+      return item ? JSON.parse(item) : initialValue;
+    } catch (error) {
+      console.error(error);
+      return initialValue;
+    }
+  });
+
+  const setValue = (value: T | ((val: T) => T)) => {
+    try {
+      const valueToStore = value instanceof Function ? value(storedValue) : value;
+      setStoredValue(valueToStore);
+      window.sessionStorage.setItem(key, JSON.stringify(valueToStore));
+    } catch (error) {
+      console.error(error);
+    }
+  };
+  return [storedValue, setValue];
+};
+
 const slugify = (text: string) => {
     return text
         .toString()
@@ -89,18 +118,12 @@ const OptionGroup: React.FC<{ title: string | React.ReactNode; children: React.R
     </div>
 );
 
-const PROMPT_TEMPLATES = [
-    { name: 'Product Review Script', template: 'Create a YouTube script reviewing [Product Name]. Start with a strong hook, cover 3 key features, discuss pros and cons, and end with a clear recommendation for [Target Audience].' },
-    { name: 'Explainer Video Concept', template: 'Develop a concept for a short explainer video about [Topic]. The style should be simple and animated. Break down the topic into 3 simple steps.' },
-    { name: 'Cinematic B-Roll Shot', template: 'A cinematic, slow-motion shot of [Subject], with dramatic lighting and a shallow depth of field.' },
-    { name: 'Podcast Intro TTS', template: 'Welcome to the [Podcast Name] show, where we explore [Topic]. In today\'s episode, we\'re diving deep into [Episode Subject]. Let\'s get started.' },
-];
-
 
 const GenerationControls: React.FC<{
     activeTab: GenerationType;
     prompt: string;
     setPrompt: (p: string) => void;
+    onOpenTemplates: () => void;
     link: string;
     setLink: (l: string) => void;
     imageModel: ImageModel;
@@ -117,14 +140,25 @@ const GenerationControls: React.FC<{
     setVideoAspectRatio: (ar: VideoAspectRatio) => void;
     resolution: VideoResolution;
     setResolution: (r: VideoResolution) => void;
-    videoDuration: VideoDuration;
-    setVideoDuration: (d: VideoDuration) => void;
+    videoDuration: number;
+    setVideoDuration: (d: number) => void;
     videoStylePresets: string[];
     setVideoStylePresets: (ss: string[]) => void;
     referenceFrames: { file: File, preview: string }[];
     setReferenceFrames: (f: { file: File, preview: string }[]) => void;
-    apiKeySet: boolean;
+    watermark: string;
+    setWatermark: (w: string) => void;
+    
+    // API Key props
+    inputApiKey: string;
+    setInputApiKey: (k: string) => void;
+    handleValidateKey: () => void;
+    isKeyValidating: boolean;
+    isKeyValid: boolean;
+    keyValidationError: string | null;
+    apiKeySet: boolean; // From AI Studio
     handleSelectKey: () => void;
+
     voiceoverScripts: VoiceoverScript[];
     setVoiceoverScripts: (vs: VoiceoverScript[]) => void;
 }> = (props) => {
@@ -189,6 +223,9 @@ const GenerationControls: React.FC<{
     
         return (
             <div>
+                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    <strong>1 image:</strong> starting frame. <strong>2 images:</strong> start & end frames. <strong>3 images:</strong> reference assets (requires Veo HD).
+                </p>
                  <div className="grid grid-cols-3 gap-2 mb-2">
                     {props.referenceFrames.map((frame, index) => (
                         <div key={index} className="relative h-20">
@@ -219,10 +256,88 @@ const GenerationControls: React.FC<{
 
     const isMultiFrame = props.referenceFrames.length > 1;
 
+    const ApiKeyManager = () => {
+        let statusMessage: string;
+        let statusTextColor: string;
+        let statusDotColor: string;
+    
+        if (props.isKeyValidating) {
+            statusMessage = "Validating...";
+            statusTextColor = "text-yellow-600 dark:text-yellow-400";
+            statusDotColor = "bg-yellow-400 animate-pulse";
+        } else if (props.isKeyValid) {
+            statusMessage = "Manual Key Active";
+            statusTextColor = "text-green-600 dark:text-green-400";
+            statusDotColor = "bg-green-500";
+        } else if (props.apiKeySet) {
+            statusMessage = "AI Studio Key Active";
+            statusTextColor = "text-green-600 dark:text-green-400";
+            statusDotColor = "bg-green-500";
+        } else {
+            statusMessage = "Key Required";
+            statusTextColor = "text-red-600 dark:text-red-400";
+            statusDotColor = "bg-red-500";
+        }
+    
+        return (
+            <OptionGroup title="API Key">
+                <div className="p-4 bg-gray-100 dark:bg-gray-900/50 rounded-lg space-y-3">
+                     <div className="flex items-center justify-between text-sm">
+                        <span className="font-semibold text-gray-700 dark:text-gray-300">Status:</span>
+                        <div className="flex items-center space-x-2">
+                            <div className={`h-2.5 w-2.5 rounded-full ${statusDotColor}`}></div>
+                            <span className={`${statusTextColor}`}>{statusMessage}</span>
+                        </div>
+                    </div>
+
+                    {props.keyValidationError && (
+                        <p className="text-xs text-center text-red-500">{props.keyValidationError}</p>
+                    )}
+                    <div className="flex items-center space-x-2">
+                        <input
+                            type="password"
+                            placeholder="Enter your API Key"
+                            value={props.inputApiKey}
+                            onChange={(e) => props.setInputApiKey(e.target.value)}
+                            className="block w-full px-3 py-2 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm"
+                        />
+                        <button 
+                            onClick={props.handleValidateKey}
+                            disabled={props.isKeyValidating || !props.inputApiKey}
+                            className="px-4 py-2 text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400"
+                        >
+                            {props.isKeyValidating ? '...' : 'Save'}
+                        </button>
+                    </div>
+                    <div className="flex items-center">
+                        <div className="flex-grow border-t border-gray-300 dark:border-gray-600"></div>
+                        <span className="flex-shrink mx-4 text-gray-400 dark:text-gray-500 text-xs">OR</span>
+                        <div className="flex-grow border-t border-gray-300 dark:border-gray-600"></div>
+                    </div>
+                    <button onClick={props.handleSelectKey} className="w-full p-2 text-sm rounded-md bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600">
+                        Select Key with AI Studio
+                    </button>
+                    <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-xs text-center block text-gray-400 hover:underline">A key with billing enabled is required. Learn more.</a>
+                </div>
+            </OptionGroup>
+        );
+    }
+
+
     return (
-        <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg space-y-6">
-            <OptionGroup title="Your Creative Prompt">
+        <div id="generation-controls" className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg space-y-6">
+            <OptionGroup title={
+                <div className="flex justify-between items-center">
+                    <span>Your Creative Prompt</span>
+                    {props.activeTab !== 'video' && props.activeTab !== 'speech' && (
+                        <button onClick={props.onOpenTemplates} className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
+                            Templates
+                        </button>
+                    )}
+                </div>
+            }>
                 <textarea
+                    id="prompt-textarea"
                     rows={props.activeTab === 'script' ? 8 : (props.activeTab === 'speech' ? 8 : 4)}
                     value={props.prompt}
                     onChange={(e) => props.setPrompt(e.target.value)}
@@ -253,26 +368,6 @@ const GenerationControls: React.FC<{
                         </div>
                     </div>
                 </OptionGroup>
-            )}
-
-            {props.activeTab !== 'video' && props.activeTab !== 'speech' && (
-                <details className="space-y-2">
-                    <summary className="text-sm font-semibold cursor-pointer text-gray-600 dark:text-gray-400">Prompt Helper</summary>
-                    <div className="p-3 bg-gray-100 dark:bg-gray-900/50 rounded-lg space-y-2">
-                        <p className="text-xs text-gray-500">Get started with a template:</p>
-                        <div className="flex flex-wrap gap-2">
-                            {PROMPT_TEMPLATES.map(template => (
-                                <button
-                                    key={template.name}
-                                    onClick={() => props.setPrompt(template.template)}
-                                    className="px-3 py-1 text-xs font-medium bg-white dark:bg-gray-700 rounded-full border border-gray-300 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600"
-                                >
-                                    {template.name}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </details>
             )}
 
             {props.activeTab === 'image' && (
@@ -332,11 +427,19 @@ const GenerationControls: React.FC<{
                                    <button onClick={() => props.setVideoModel('veo-3.1-generate-preview')} disabled={isMultiFrame} className={`p-2 text-sm rounded-md ${props.videoModel === 'veo-3.1-generate-preview' ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-700'} disabled:opacity-50`}>Veo 3.1 HD</button>
                                 </div>
                             </OptionGroup>
-                            <OptionGroup title="Target Duration">
-                                <div className="grid grid-cols-3 gap-2">
-                                    <button onClick={() => props.setVideoDuration('short')} className={`p-2 text-sm rounded-md ${props.videoDuration === 'short' ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>Short (~15s)</button>
-                                    <button onClick={() => props.setVideoDuration('medium')} className={`p-2 text-sm rounded-md ${props.videoDuration === 'medium' ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>Medium (~30s)</button>
-                                    <button onClick={() => props.setVideoDuration('long')} className={`p-2 text-sm rounded-md ${props.videoDuration === 'long' ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>Long (~60s)</button>
+                            <OptionGroup title={`Target Duration: ${props.videoDuration}s`}>
+                                <input
+                                    type="range"
+                                    min="5"
+                                    max="60"
+                                    step="1"
+                                    value={props.videoDuration}
+                                    onChange={(e) => props.setVideoDuration(Number(e.target.value))}
+                                    className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                />
+                                <div className="flex justify-between text-xs text-gray-500 mt-1 px-1">
+                                    <span>5s</span>
+                                    <span>60s</span>
                                 </div>
                             </OptionGroup>
                              <div className="grid grid-cols-2 gap-4">
@@ -348,11 +451,20 @@ const GenerationControls: React.FC<{
                                 </OptionGroup>
                                 <OptionGroup title="Quality">
                                     <div className="grid grid-cols-1 gap-2">
-                                        <button onClick={() => props.setResolution('720p')} disabled={isMultiFrame} className={`p-2 text-sm rounded-md ${props.resolution === '720p' ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-700'} disabled:opacity-50`}>HD (720p)</button>
+                                        <button onClick={() => props.setResolution('720p')} className={`p-2 text-sm rounded-md ${props.resolution === '720p' ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>HD (720p)</button>
                                         <button onClick={() => props.setResolution('1080p')} disabled={isMultiFrame} className={`p-2 text-sm rounded-md ${props.resolution === '1080p' ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-700'} disabled:opacity-50`}>Full HD (1080p)</button>
                                     </div>
                                 </OptionGroup>
                              </div>
+                             <OptionGroup title="Watermark (Preview)">
+                                <input
+                                    type="text"
+                                    value={props.watermark}
+                                    onChange={(e) => props.setWatermark(e.target.value)}
+                                    className="w-full px-3 py-2 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md"
+                                    placeholder="e.g., @YourBrand"
+                                />
+                            </OptionGroup>
                             <OptionGroup title={
                                 <div className="flex justify-between items-center">
                                     <span>Style Presets</span>
@@ -367,15 +479,11 @@ const GenerationControls: React.FC<{
                                     ))}
                                 </div>
                             </OptionGroup>
-                            <OptionGroup title="API Key">
-                               <button onClick={props.handleSelectKey} className={`w-full p-2 text-sm rounded-md ${props.apiKeySet ? 'bg-green-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>
-                                   {props.apiKeySet ? 'API Key Selected' : 'Select API Key'}
-                               </button>
-                           </OptionGroup>
+                            <ApiKeyManager />
                         </div>
                     </details>
                     <details className="space-y-4" open>
-                        <summary className="text-lg font-semibold cursor-pointer">Voiceover Settings</summary>
+                        <summary className="text-lg font-semibold cursor-pointer">Generate Voiceover</summary>
                          <div className="pl-4 border-l-2 border-gray-200 dark:border-gray-700 space-y-4">
                             {props.voiceoverScripts.map((vs) => (
                                 <div key={vs.id} className="p-3 bg-gray-100 dark:bg-gray-900/50 rounded-lg">
@@ -407,760 +515,722 @@ const GenerationControls: React.FC<{
                             <button 
                                 onClick={addVoiceoverScript} 
                                 disabled={props.voiceoverScripts.length >= 2}
-                                className="w-full p-2 text-sm rounded-md bg-gray-200 dark:bg-gray-700 disabled:opacity-50"
+                                className="w-full flex items-center justify-center p-2 text-sm font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/50 rounded-md hover:bg-indigo-200 dark:hover:bg-indigo-900 disabled:opacity-50"
                             >
-                                Add Speaker
+                                <PlusCircleIcon className="h-5 w-5 mr-2" />
+                                Add Speaker (Max 2)
                             </button>
-                            {props.voiceoverScripts.length >= 2 && <p className="text-xs text-center text-gray-500">Multi-speaker supports a maximum of two voices.</p>}
                          </div>
                     </details>
-                 </>
+                </>
             )}
 
              {props.activeTab === 'speech' && (
-                <OptionGroup title="Voice Selection">
-                     <select
-                        value={props.voiceoverScripts[0]?.voice || PROFESSIONAL_VOICES[0]}
-                        onChange={e => props.setVoiceoverScripts([{...props.voiceoverScripts[0], id: 1, speaker: 'Speaker 1', script: props.prompt, voice: e.target.value}])}
-                        className="w-full mt-2 p-2 text-sm bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md"
-                    >
-                        {PROFESSIONAL_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                </OptionGroup>
+                <>
+                   <OptionGroup title="Voice Selection">
+                        <select 
+                            value={props.voiceoverScripts[0]?.voice || PROFESSIONAL_VOICES[0]}
+                            onChange={e => props.setVoiceoverScripts([{ ...props.voiceoverScripts[0], id: 1, speaker: 'Speaker 1', voice: e.target.value, script: props.prompt }])}
+                            className="w-full p-2 text-sm bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm"
+                        >
+                            {PROFESSIONAL_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                    </OptionGroup>
+                </>
             )}
         </div>
     );
 };
 
-const GenerationCanvas: React.FC<{
-    activeTab: GenerationType,
-    isLoading: boolean,
-    error: string | null,
-    generationWarning: string | null,
-    generatedContent: any | null,
-    parsedScript: ViralScript | null,
-    generatedAudio: { url: string, blob: Blob, format: 'mp3' | 'wav' } | null,
-    generatedVideo: string | null,
-    prompt: string,
-    videoDuration: VideoDuration,
-    voiceoverScripts: VoiceoverScript[],
-    onGenerateVideoFromScript: (script: string) => void,
-    onGenerateThumbnail: (concept: string) => void;
-    onGenerateThumbnailFromHeader: () => void;
-    onGenerateSocialPost: (script: string) => Promise<void>,
-    isGeneratingSocialPost: boolean,
-    previousVideoPayload: any | null,
-    onExtendVideo: () => Promise<void>,
-    isExtending: boolean,
-    extendPrompt: string,
-    setExtendPrompt: (prompt: string) => void,
-    onListenToScript: (script: string, voice: string, style: string) => Promise<void>,
-    isGeneratingScriptAudio: boolean,
-    scriptAudio: { url: string; blob: Blob } | null,
-    onCancelScriptAudio: () => void,
-    onStartEdit: (imageDataUrl: string) => void,
-    onExportFrame: (videoEl: HTMLVideoElement | null, fileName: string) => void,
-}> = ({ 
-    activeTab, 
-    isLoading, 
-    error, 
-    generationWarning, 
-    generatedContent,
-    parsedScript,
-    generatedAudio, 
-    generatedVideo, 
-    prompt, 
-    videoDuration, 
-    voiceoverScripts,
-    onGenerateVideoFromScript,
-    onGenerateThumbnail,
-    onGenerateThumbnailFromHeader,
-    onGenerateSocialPost,
-    isGeneratingSocialPost,
-    previousVideoPayload,
-    onExtendVideo,
-    isExtending,
-    extendPrompt,
-    setExtendPrompt,
-    onListenToScript,
-    isGeneratingScriptAudio,
-    scriptAudio,
-    onCancelScriptAudio,
-    onStartEdit,
-    onExportFrame,
-}) => {
-    
-    const slug = slugify(prompt || 'generated-content');
-    const videoScript = voiceoverScripts.map(vs => vs.script).join('\n\n');
+
+const ResultCard: React.FC<{ 
+    title: string; 
+    children: React.ReactNode;
+    actions?: React.ReactNode;
+}> = ({ title, children, actions }) => (
+    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+            <h3 className="text-xl font-bold text-gray-800 dark:text-white">{title}</h3>
+            {actions && <div className="flex items-center space-x-2">{actions}</div>}
+        </div>
+        <div className="p-4">{children}</div>
+    </div>
+);
+
+
+const VideoResult: React.FC<{
+    video: { url: string, payload: any };
+    prompt: string;
+    watermark: string;
+    onExtend: (prompt: string, payload: any) => void;
+    isExtending: boolean;
+    onRemix: (remixPrompt: string) => void;
+    isRemixing: boolean;
+    onCancel: () => void;
+    onExportSrt: (duration: number) => void;
+    onExportFrame: (videoEl: HTMLVideoElement) => void;
+    onUseFrameAsStart: (videoEl: HTMLVideoElement) => void;
+    onRemixFromFrame: (videoEl: HTMLVideoElement) => void;
+}> = ({ video, prompt, watermark, onExtend, isExtending, onRemix, isRemixing, onCancel, onExportSrt, onExportFrame, onUseFrameAsStart, onRemixFromFrame }) => {
+    const [extendPrompt, setExtendPrompt] = useState('');
+    const [remixPrompt, setRemixPrompt] = useState('');
     const videoRef = useRef<HTMLVideoElement>(null);
+    
+    const handleExtend = () => {
+        if (extendPrompt.trim()) {
+            onExtend(extendPrompt, video.payload);
+        }
+    };
 
-    const handleDownloadSrt = () => {
-        if (!videoScript) return;
+    const handleRemix = () => {
+        if (remixPrompt.trim()) {
+            onRemix(remixPrompt);
+        }
+    };
+    
+    const handleExportSrt = () => {
+        if (videoRef.current) {
+            onExportSrt(videoRef.current.duration);
+        }
+    };
 
-        const durationMap: Record<VideoDuration, number> = {
-            short: 15,
-            medium: 30,
-            long: 60,
-        };
-        const duration = durationMap[videoDuration];
-        const srtContent = exportScriptAsSrt(videoScript, duration);
+    const handleExportFrame = () => {
+        if (videoRef.current) {
+            onExportFrame(videoRef.current);
+        }
+    };
+
+    const handleUseFrameAsStart = () => {
+        if (videoRef.current) {
+            onUseFrameAsStart(videoRef.current);
+        }
+    };
+
+    const handleRemixFromFrame = () => {
+        if (videoRef.current) {
+            onRemixFromFrame(videoRef.current);
+        }
+    };
+
+    return (
+         <div className="space-y-4">
+            <div className="relative w-full">
+                <video ref={videoRef} src={video.url} controls autoPlay loop className="w-full rounded-lg" />
+                {watermark && (
+                    <div className="absolute bottom-4 right-4 text-white text-lg font-bold opacity-70 pointer-events-none" style={{ textShadow: '0 0 5px black' }}>
+                        {watermark}
+                    </div>
+                )}
+            </div>
+            <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-lg space-y-4">
+                <details>
+                    <summary className="font-semibold cursor-pointer">Remix Video</summary>
+                    <div className="mt-2 space-y-2">
+                         <textarea
+                            rows={2}
+                            value={remixPrompt}
+                            onChange={e => setRemixPrompt(e.target.value)}
+                            className="w-full text-sm p-2 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md"
+                            placeholder="e.g., Make it black and white, add a vintage film grain."
+                        />
+                        <button 
+                            onClick={handleRemix}
+                            disabled={isRemixing || !remixPrompt.trim()}
+                            className="w-full flex items-center justify-center p-2 text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 disabled:bg-green-400"
+                        >
+                            <SparklesIcon className="h-4 w-4 mr-2" />
+                            {isRemixing ? 'Remixing...' : 'Remix Video'}
+                        </button>
+                    </div>
+                </details>
+                <details>
+                    <summary className="font-semibold cursor-pointer">Extend Video</summary>
+                    <div className="mt-2 space-y-2">
+                         <textarea
+                            rows={2}
+                            value={extendPrompt}
+                            onChange={e => setExtendPrompt(e.target.value)}
+                            className="w-full text-sm p-2 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md"
+                            placeholder="e.g., ...and then a spaceship flies by."
+                        />
+                        <button 
+                            onClick={handleExtend}
+                            disabled={isExtending || !extendPrompt.trim()}
+                            className="w-full flex items-center justify-center p-2 text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400"
+                        >
+                            <PencilIcon className="h-4 w-4 mr-2" />
+                            {isExtending ? 'Extending...' : 'Extend Video (+7s)'}
+                        </button>
+                    </div>
+                </details>
+                 <details>
+                    <summary className="font-semibold cursor-pointer">Export &amp; Frame Tools</summary>
+                     <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button onClick={handleExportSrt} className="flex items-center justify-center p-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600">
+                           <ClosedCaptionIcon className="h-4 w-4 mr-2" /> Download SRT
+                        </button>
+                         <button onClick={handleExportFrame} className="flex items-center justify-center p-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600">
+                           <CameraIcon className="h-4 w-4 mr-2" /> Capture Frame
+                        </button>
+                        <button onClick={handleUseFrameAsStart} className="flex items-center justify-center p-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600">
+                           <ImageIcon className="h-4 w-4 mr-2" /> Use as Start
+                        </button>
+                         <button onClick={handleRemixFromFrame} className="flex items-center justify-center p-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600">
+                           <PencilIcon className="h-4 w-4 mr-2" /> Remix from Frame
+                        </button>
+                    </div>
+                </details>
+            </div>
+        </div>
+    );
+};
+
+
+export const GenerationView: React.FC<GenerationViewProps> = ({ brandVoice, onAttemptGenerate, onSuccessfulGeneration, initialScript, onScriptConsumed, addNotification }) => {
+    // Shared State
+    const [activeTab, setActiveTab] = useState<GenerationType>('script');
+    const [prompt, setPrompt] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [promptHistory, setPromptHistory] = useLocalStorage<PromptHistoryItem[]>('promptHistory', []);
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+    const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
+
+    // Script State
+    const [link, setLink] = useState('');
+    const [viralScript, setViralScript] = useState<ViralScript | null>(null);
+    const [generatedSocialPost, setGeneratedSocialPost] = useState<string | null>(null);
+    const [isGeneratingSocialPost, setIsGeneratingSocialPost] = useState(false);
+    const [scriptAudio, setScriptAudio] = useState<{ url: string; blob: Blob } | null>(null);
+    const [isGeneratingScriptAudio, setIsGeneratingScriptAudio] = useState(false);
+
+
+    // Image State
+    const [imageModel, setImageModel] = useLocalStorage<ImageModel>('imageModel', 'imagen-4.0-generate-001');
+    const [imageAspectRatio, setImageAspectRatio] = useLocalStorage<ImageAspectRatio>('imageAspectRatio', '1:1');
+    const [imageStylePresets, setImageStylePresets] = useLocalStorage<string[]>('imageStylePresets', []);
+    const [imageMimeType, setImageMimeType] = useLocalStorage<ImageMimeType>('imageMimeType', 'image/jpeg');
+    const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editPrompt, setEditPrompt] = useState('');
+    
+    // Video State
+    const [videoModel, setVideoModel] = useLocalStorage<VideoModel>('videoModel', 'veo-3.1-fast-generate-preview');
+    const [videoAspectRatio, setVideoAspectRatio] = useLocalStorage<VideoAspectRatio>('videoAspectRatio', '16:9');
+    const [resolution, setResolution] = useLocalStorage<VideoResolution>('resolution', '1080p');
+    const [videoDuration, setVideoDuration] = useLocalStorage<number>('videoDuration', 15);
+    const [videoStylePresets, setVideoStylePresets] = useLocalStorage<string[]>('videoStylePresets', []);
+    const [referenceFrames, setReferenceFrames] = useState<{ file: File, preview: string }[]>([]);
+    const [generatedVideo, setGeneratedVideo] = useState<{ url: string, payload: any } | null>(null);
+    const [isExtendingVideo, setIsExtendingVideo] = useState(false);
+    const [isRemixing, setIsRemixing] = useState(false);
+    const [apiKeySet, setApiKeySet] = useState(false); // For AI Studio selection
+    const [inputApiKey, setInputApiKey] = useState('');
+    const [validatedApiKey, setValidatedApiKey] = useSessionStorage<string | null>('validatedApiKey', null);
+    const [isKeyValidating, setIsKeyValidating] = useState(false);
+    const [isKeyValid, setIsKeyValid] = useState(!!validatedApiKey);
+    const [keyValidationError, setKeyValidationError] = useState<string | null>(null);
+    const [watermark, setWatermark] = useState('');
+
+    // Speech State
+    const [voiceoverScripts, setVoiceoverScripts] = useLocalStorage<VoiceoverScript[]>('voiceoverScripts', [
+        { id: 1, speaker: 'Speaker 1', script: '', voice: 'Kore' }
+    ]);
+    const [generatedSpeechUrl, setGeneratedSpeechUrl] = useState<string | null>(null);
+
+    // Initial script from another view
+    useEffect(() => {
+        if (initialScript) {
+            setPrompt(initialScript);
+            setActiveTab('video');
+            onScriptConsumed();
+        }
+    }, [initialScript, onScriptConsumed]);
+    
+    // Check for API key on mount
+    useEffect(() => {
+        if (activeTab === 'video') {
+            window.aistudio?.hasSelectedApiKey().then(setApiKeySet);
+        }
+    }, [activeTab]);
+
+    useEffect(() => {
+      if (error) {
+        addNotification(error, 'error');
+        setError(null); // Clear local error after passing to global state
+      }
+    }, [error, addNotification]);
+
+    const addToHistory = (item: Omit<PromptHistoryItem, 'timestamp'>) => {
+        const newItem = { ...item, timestamp: new Date().toISOString() };
+        setPromptHistory(prev => [newItem, ...prev.slice(0, 99)]); // Keep last 100
+    };
+    
+    const handleSelectFromHistory = (item: PromptHistoryItem) => {
+        setActiveTab(item.type);
+        setPrompt(item.prompt);
+        // Restore all settings from history
+        if(item.link) setLink(item.link);
+        if(item.imageModel) setImageModel(item.imageModel);
+        if(item.aspectRatio) {
+            if(item.type === 'image') setImageAspectRatio(item.aspectRatio as ImageAspectRatio);
+            if(item.type === 'video') setVideoAspectRatio(item.aspectRatio as VideoAspectRatio);
+        }
+        if(item.imageStylePresets) setImageStylePresets(item.imageStylePresets);
+        if(item.imageMimeType) setImageMimeType(item.imageMimeType);
+        if(item.videoModel) setVideoModel(item.videoModel);
+        if(item.resolution) setResolution(item.resolution as VideoResolution);
+        if(item.videoDuration) setVideoDuration(item.videoDuration as number);
+        if(item.videoStylePresets) setVideoStylePresets(item.videoStylePresets);
+        if(item.voiceoverScripts) setVoiceoverScripts(item.voiceoverScripts);
+        if(item.voice) setVoiceoverScripts([{ id: 1, speaker: 'Speaker 1', script: item.prompt, voice: item.voice }]);
+
+        setIsHistoryOpen(false);
+    };
+
+    const resetResults = () => {
+        setError(null);
+        setViralScript(null);
+        setGeneratedImage(null);
+        setGeneratedVideo(null);
+        setGeneratedSpeechUrl(null);
+        setGeneratedSocialPost(null);
+        setScriptAudio(null);
+    };
+    
+    const handleGenerate = async () => {
+        if (!prompt.trim() && activeTab !== 'speech') {
+            setError('Please enter a prompt.');
+            return;
+        }
+        if (activeTab === 'speech' && voiceoverScripts.every(vs => !vs.script.trim()) && !prompt.trim()) {
+            setError('Please enter some text for the speech generation.');
+            return;
+        }
+
+        if (!onAttemptGenerate()) return;
+        
+        resetResults();
+        setIsLoading(true);
+
+        try {
+            switch (activeTab) {
+                case 'script':
+                    const fullPrompt = `${prompt} ${link ? `(Inspired by: ${link})` : ''}`;
+                    const scriptText = await generateViralScript(fullPrompt, link, brandVoice);
+                    setViralScript(parseViralScript(scriptText));
+                    addToHistory({ type: 'script', prompt, link });
+                    break;
+                case 'image':
+                    const imagePrompt = `${prompt} ${imageStylePresets.join(', ')}`;
+                    const imageUrl = await generateImage(imagePrompt, imageModel, imageAspectRatio, imageMimeType);
+                    setGeneratedImage(imageUrl);
+                    addToHistory({ type: 'image', prompt, imageModel, aspectRatio: imageAspectRatio, imageStylePresets, imageMimeType });
+                    break;
+                case 'video':
+                    const apiKey = validatedApiKey || (apiKeySet ? process.env.API_KEY : null);
+                    if (!apiKey) {
+                        throw new Error("An API key is required for video generation. Please select or enter a valid key.");
+                    }
+                    const frameData = await Promise.all(referenceFrames.map(async f => {
+                        const base64 = await new Promise<string>(resolve => {
+                            const reader = new FileReader();
+                            reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+                            reader.readAsDataURL(f.file);
+                        });
+                        return { data: base64, mimeType: f.file.type };
+                    }));
+                    const videoPrompt = `${prompt} ${videoStylePresets.join(', ')}`;
+                    const videoResult = await generateVideo(videoPrompt, videoModel, videoDuration, videoAspectRatio, resolution, frameData, apiKey);
+                    setGeneratedVideo(videoResult);
+                    addToHistory({ type: 'video', prompt, videoModel, aspectRatio: videoAspectRatio, resolution, videoDuration, videoStylePresets, referenceFrameCount: frameData.length });
+                    break;
+                case 'speech':
+                    const scriptsToProcess = prompt.trim() ? [{ id: 1, speaker: 'Speaker 1', script: prompt, voice: voiceoverScripts[0]?.voice || 'Kore' }] : voiceoverScripts;
+                    const speechBase64 = await generateSpeech(scriptsToProcess);
+                    if(speechBase64) {
+                        const audioBlob = pcmToMp3Blob(new Int16Array(decode(speechBase64).buffer), 24000, 1);
+                        setGeneratedSpeechUrl(URL.createObjectURL(audioBlob));
+                    }
+                    addToHistory({ type: 'speech', prompt, voiceoverScripts: scriptsToProcess });
+                    break;
+            }
+            onSuccessfulGeneration();
+        } catch (err: any) {
+             if (err.message?.includes('API Key validation failed')) {
+                // Reset key state if it fails, forcing user to re-select
+                setValidatedApiKey(null);
+                setIsKeyValid(false);
+                setApiKeySet(false);
+                setError("Your API Key failed. Please select a valid key with billing enabled and try again.");
+            } else {
+                setError(err.message || 'An unexpected error occurred.');
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    const handleGenerateSocialPost = async (script: string) => {
+        if (!onAttemptGenerate()) return;
+        setIsGeneratingSocialPost(true);
+        try {
+            const post = await generateSocialPostFromScript(script, brandVoice);
+            setGeneratedSocialPost(post);
+            onSuccessfulGeneration();
+        } catch (err: any) {
+             setError(err.message || 'Failed to generate social post.');
+        } finally {
+            setIsGeneratingSocialPost(false);
+        }
+    };
+    
+     const handleListenToScript = async (script: string, voice: string, style: string) => {
+        if (!onAttemptGenerate()) return;
+        if (scriptAudio) URL.revokeObjectURL(scriptAudio.url);
+        setScriptAudio(null);
+        setIsGeneratingScriptAudio(true);
+        try {
+            const audioBlob = await generateSpeechFromText(script, voice, style);
+            setScriptAudio({ url: URL.createObjectURL(audioBlob), blob: audioBlob });
+            onSuccessfulGeneration();
+        } catch (err: any) {
+            setError(err.message || 'Failed to generate audio for the script.');
+        } finally {
+            setIsGeneratingScriptAudio(false);
+        }
+    };
+    
+    const handleExtendVideo = async (newPrompt: string, payload: any) => {
+        if (!onAttemptGenerate()) return;
+        setIsExtendingVideo(true);
+        setError(null);
+        try {
+             const apiKey = validatedApiKey || (apiKeySet ? process.env.API_KEY : null);
+            if (!apiKey) {
+                throw new Error("An API key is required for video generation. Please select or enter a valid key.");
+            }
+            const extendedVideo = await extendVideo(newPrompt, payload, apiKey);
+            setGeneratedVideo(extendedVideo);
+            onSuccessfulGeneration();
+        } catch(err: any) {
+            setError(err.message || 'Failed to extend video.');
+        } finally {
+            setIsExtendingVideo(false);
+        }
+    };
+
+    const handleRemixVideo = async (remixPrompt: string) => {
+        if (!remixPrompt.trim() || !onAttemptGenerate()) return;
+    
+        setIsRemixing(true);
+        setError(null);
+        try {
+            const apiKey = validatedApiKey || (apiKeySet ? process.env.API_KEY : null);
+            if (!apiKey) {
+                throw new Error("An API key is required for video generation.");
+            }
+            
+            // Use the original prompt and append the remix instructions
+            const newPrompt = `${prompt}\n\nREMIX INSTRUCTION: ${remixPrompt}`;
+            
+            // Re-use existing reference frames for the remix
+            const frameData = await Promise.all(referenceFrames.map(async f => {
+                const base64 = await new Promise<string>(resolve => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+                    reader.readAsDataURL(f.file);
+                });
+                return { data: base64, mimeType: f.file.type };
+            }));
+
+            const videoResult = await generateVideo(newPrompt, videoModel, videoDuration, videoAspectRatio, resolution, frameData, apiKey);
+            
+            setGeneratedVideo(videoResult);
+            // We update the main prompt so the user can see what was used for the remix
+            setPrompt(newPrompt); 
+            addToHistory({ type: 'video', prompt: newPrompt, videoModel, aspectRatio: videoAspectRatio, resolution, videoDuration, videoStylePresets, referenceFrameCount: frameData.length });
+            onSuccessfulGeneration();
+        } catch (err: any) {
+            if (err.message?.includes('API Key validation failed')) {
+                setValidatedApiKey(null);
+                setIsKeyValid(false);
+                setApiKeySet(false);
+                setError("Your API Key failed. Please select a valid key and try again.");
+            } else {
+                setError(err.message || 'An unexpected error occurred during remix.');
+            }
+        } finally {
+            setIsRemixing(false);
+        }
+    };
+    
+    const handleEditImage = async () => {
+        if (!editPrompt.trim() || !generatedImage || !onAttemptGenerate()) return;
+        setIsLoading(true);
+        setError(null);
+        try {
+            const [header, base64] = generatedImage.split(',');
+            const mimeType = header.match(/:(.*?);/)?.[1] || 'image/jpeg';
+            const newImageUrl = await editImage(base64, mimeType, editPrompt);
+            setGeneratedImage(newImageUrl);
+            setEditPrompt('');
+            onSuccessfulGeneration();
+        } catch(err: any) {
+             setError(err.message || 'Failed to edit image.');
+        } finally {
+            setIsLoading(false);
+        }
+    }
+    
+    const handleSelectKey = async () => {
+        await window.aistudio?.openSelectKey();
+        // Assume success and check again
+        const hasKey = await window.aistudio?.hasSelectedApiKey();
+        setApiKeySet(hasKey);
+        if(hasKey) {
+            // Clear manual key if studio key is selected
+            setInputApiKey('');
+            setValidatedApiKey(null);
+            setIsKeyValid(false);
+            setKeyValidationError(null);
+            addNotification('AI Studio API Key selected.', 'success');
+        }
+    };
+
+    const handleValidateKey = useCallback(async () => {
+        if (!inputApiKey) return;
+        setIsKeyValidating(true);
+        setKeyValidationError(null);
+        try {
+            const isValid = await validateApiKey(inputApiKey);
+            if (isValid) {
+                setValidatedApiKey(inputApiKey);
+                setIsKeyValid(true);
+                setApiKeySet(false); // Prioritize manual key
+                addNotification('Manual API Key is valid and active.', 'success');
+            } else {
+                setValidatedApiKey(null);
+                setIsKeyValid(false);
+                setKeyValidationError('This API key is invalid or lacks permissions.');
+            }
+        } catch(e) {
+             setValidatedApiKey(null);
+             setIsKeyValid(false);
+             setKeyValidationError('Validation failed. Check your network and the key.');
+        } finally {
+            setIsKeyValidating(false);
+        }
+    }, [inputApiKey, setValidatedApiKey, addNotification]);
+    
+    const onExportSrt = (duration: number) => {
+        if (!prompt) return;
+        const srtContent = exportScriptAsSrt(prompt, duration);
         const blob = new Blob([srtContent], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${slug}_script.srt`;
+        a.download = `${slugify(prompt)}_subtitles.srt`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     };
 
-    if (isLoading) {
-        return <div className="flex items-center justify-center h-full"><Loader message="Your content is being generated..." /></div>;
-    }
-    if (error) {
-        return (
-             <div className="h-full flex items-center justify-center p-4">
-                <div className="w-full bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg text-center" role="alert">
-                    <strong className="font-bold">Generation Failed</strong>
-                    <p className="text-sm">{error}</p>
-                </div>
-            </div>
-        );
-    }
-     if (generationWarning) {
-        return (
-             <div className="h-full flex items-center justify-center p-4">
-                <div className="w-full bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded-lg text-center" role="alert">
-                    <strong className="font-bold">Generation Notice</strong>
-                    <p className="text-sm">{generationWarning}</p>
-                </div>
-            </div>
-        );
-    }
-    if (parsedScript) {
-        return (
-            <div className="p-4 h-full overflow-y-auto">
-                <ViralScriptCard 
-                    scriptData={parsedScript} 
-                    onGenerateVideoFromScript={onGenerateVideoFromScript}
-                    onGenerateThumbnail={onGenerateThumbnail}
-                    onGenerateThumbnailFromHeader={onGenerateThumbnailFromHeader}
-                    onGenerateSocialPost={onGenerateSocialPost}
-                    isGeneratingSocialPost={isGeneratingSocialPost}
-                    onListenToScript={onListenToScript}
-                    isGeneratingScriptAudio={isGeneratingScriptAudio}
-                    scriptAudio={scriptAudio}
-                    onCancelScriptAudio={onCancelScriptAudio}
-                />
-            </div>
-        )
-    }
-    if (generatedContent && activeTab === 'image') {
-        return (
-            <div className="p-4 h-full overflow-y-auto">
-                <div className="space-y-4">
-                    <img src={generatedContent as string} alt="Generated" className="rounded-lg shadow-lg w-full" />
-                    <div className="grid grid-cols-2 gap-2">
-                        <a href={generatedContent as string} download={`${slug}_image.png`} className="w-full block text-center p-2 bg-indigo-600 text-white rounded-md">Download Image</a>
-                        <button onClick={() => onStartEdit(generatedContent as string)} className="w-full flex items-center justify-center text-center p-2 bg-purple-600 text-white rounded-md">
-                            <PencilIcon className="h-4 w-4 mr-2" /> Edit This Image
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )
-    }
-     if (generatedVideo) {
-         return (
-             <div className="p-4 h-full overflow-y-auto">
-                <div className="space-y-4">
-                    <video ref={videoRef} src={generatedVideo} controls className="rounded-lg shadow-lg w-full" />
-                    <div className="grid grid-cols-3 gap-2">
-                        <a href={generatedVideo} download={`${slug}_video.mp4`} className="w-full block text-center p-2 bg-indigo-600 text-white rounded-md text-sm">Download Video</a>
-                        <button onClick={() => onExportFrame(videoRef.current, slug)} className="w-full flex items-center justify-center text-center p-2 bg-gray-600 text-white rounded-md text-sm">
-                            <CameraIcon className="h-4 w-4 mr-2" /> Export Frame
-                        </button>
-                        <button onClick={handleDownloadSrt} disabled={!videoScript} className="w-full flex items-center justify-center text-center p-2 bg-gray-600 text-white rounded-md disabled:opacity-50 text-sm">
-                            <ClosedCaptionIcon className="h-4 w-4 mr-2" /> Download SRT
-                        </button>
-                    </div>
-                </div>
-                 {generatedAudio && (
-                     <div className="mt-6 space-y-4">
-                         <h4 className="font-semibold text-center">Generated Voiceover</h4>
-                         <audio src={generatedAudio.url} controls className="w-full" />
-                         <a href={generatedAudio.url} download={`${slug}_voiceover.${generatedAudio.format}`} className="w-full block text-center p-2 bg-green-600 text-white rounded-md">Download Voiceover</a>
-                     </div>
-                 )}
-                 {previousVideoPayload && (
-                    <div className="mt-6 p-4 bg-gray-200 dark:bg-gray-800/50 rounded-lg space-y-3">
-                        <h4 className="font-semibold text-center text-lg">Extend Your Video</h4>
-                        <p className="text-xs text-center text-gray-500">Describe the next scene to add ~7 seconds. Extension requires the Veo HD model and 720p resolution.</p>
-                        <textarea
-                            rows={2}
-                            value={extendPrompt}
-                            onChange={(e) => setExtendPrompt(e.target.value)}
-                            className="block w-full px-3 py-2 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm"
-                            placeholder="e.g., A close up of the cat's face as it smiles."
-                        />
-                        <button 
-                            onClick={onExtendVideo}
-                            disabled={isExtending || !extendPrompt}
-                            className="w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400"
-                        >
-                            <PlusCircleIcon className="h-5 w-5 mr-2" />
-                            {isExtending ? 'Extending...' : 'Generate Extension'}
-                        </button>
-                    </div>
-                 )}
-            </div>
-         );
-    }
-
-     if (generatedAudio) {
-         return (
-             <div className="p-4 h-full flex flex-col items-center justify-center">
-                 <div className="space-y-4 w-full max-w-sm">
-                     <h4 className="font-semibold text-center">Generated Speech</h4>
-                     <audio src={generatedAudio.url} controls className="w-full" />
-                     <a href={generatedAudio.url} download={`${slug}_speech.${generatedAudio.format}`} className="w-full block text-center p-2 bg-indigo-600 text-white rounded-md">Download Audio (MP3)</a>
-                 </div>
-            </div>
-         );
-    }
-    
-    return (
-        <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 dark:text-gray-400 p-8">
-            <MagicWandIcon className="h-16 w-16 mb-4 text-gray-400" />
-            <h3 className="text-lg font-semibold">Your creations will appear here</h3>
-            <p className="text-sm">Configure your options on the left and click "Generate" to start.</p>
-        </div>
-    );
-}
-
-export const GenerationView: React.FC<GenerationViewProps> = ({ brandVoice, onAttemptGenerate, onSuccessfulGeneration, initialScript, onScriptConsumed }) => {
-  const [activeTab, setActiveTab] = useState<GenerationType>('script');
-  const [prompt, setPrompt] = useState('');
-  const [link, setLink] = useState('');
-  
-  // Image State
-  const [imageModel, setImageModel] = useState<ImageModel>('imagen-4.0-generate-001');
-  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>('1:1');
-  const [imageStylePresets, setImageStylePresets] = useState<string[]>([]);
-  const [imageMimeType, setImageMimeType] = useState<ImageMimeType>('image/png');
-  const [isEditingImage, setIsEditingImage] = useState(false);
-  const [imageToEdit, setImageToEdit] = useState<string | null>(null);
-  const [editPrompt, setEditPrompt] = useState('');
-
-  // Video State
-  const [videoModel, setVideoModel] = useState<VideoModel>('veo-3.1-fast-generate-preview');
-  const [videoAspectRatio, setVideoAspectRatio] = useState<VideoAspectRatio>('16:9');
-  const [resolution, setResolution] = useState<VideoResolution>('720p');
-  const [videoDuration, setVideoDuration] = useState<VideoDuration>('medium');
-  const [videoStylePresets, setVideoStylePresets] = useState<string[]>([]);
-  const [referenceFrames, setReferenceFrames] = useState<{ file: File, preview: string }[]>([]);
-  const [apiKeySet, setApiKeySet] = useState(false);
-  const [previousVideoPayload, setPreviousVideoPayload] = useState<any | null>(null);
-  const [extendPrompt, setExtendPrompt] = useState('');
-  const [isExtending, setIsExtending] = useState(false);
-
-  // Speech State
-  const [voiceoverScripts, setVoiceoverScripts] = useState<VoiceoverScript[]>([]);
-  
-  // General State
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [generationWarning, setGenerationWarning] = useState<string | null>(null);
-  const cancelRequestRef = useRef(false);
-  
-  // Results
-  const [generatedContent, setGeneratedContent] = useState<string | null>(null);
-  const [parsedScript, setParsedScript] = useState<ViralScript | null>(null);
-  const [isGeneratingSocialPost, setIsGeneratingSocialPost] = useState(false);
-  const [generatedVideo, setGeneratedVideo] = useState<string | null>(null);
-  const [generatedAudio, setGeneratedAudio] = useState<{ url: string, blob: Blob, format: 'wav' | 'mp3' } | null>(null);
-  const [scriptAudio, setScriptAudio] = useState<{ url: string; blob: Blob } | null>(null);
-  const [isGeneratingScriptAudio, setIsGeneratingScriptAudio] = useState(false);
-  
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [promptHistory, setPromptHistory] = useLocalStorage<PromptHistoryItem[]>('generationPromptHistoryV3', []);
-  const [isFromScript, setIsFromScript] = useState(false);
-  
-  useEffect(() => {
-    return () => {
-      referenceFrames.forEach(f => URL.revokeObjectURL(f.preview));
-      if (generatedVideo) URL.revokeObjectURL(generatedVideo);
-      if (generatedAudio) URL.revokeObjectURL(generatedAudio.url);
-      if (scriptAudio) URL.revokeObjectURL(scriptAudio.url);
-    }
-  }, [referenceFrames, generatedVideo, generatedAudio, scriptAudio]);
-  
-  useEffect(() => {
-    if (initialScript) {
-        // Pre-fill state for video generation
-        setActiveTab('video');
-        setPrompt(initialScript);
-        // Set the script as the first voiceover line
-        setVoiceoverScripts([{ id: 1, speaker: 'Narrator', script: initialScript, voice: 'Kore' }]);
-        onScriptConsumed(); // Clear the script from parent state so it's not reused on re-renders
-        setIsFromScript(true);
-    }
-  }, [initialScript, onScriptConsumed]);
-
-  const resetGenerationState = () => {
-    setError(null);
-    setGenerationWarning(null);
-    setGeneratedContent(null);
-    setParsedScript(null);
-    setGeneratedVideo(null);
-    if (generatedAudio) URL.revokeObjectURL(generatedAudio.url);
-    setGeneratedAudio(null);
-    if (scriptAudio) URL.revokeObjectURL(scriptAudio.url);
-    setScriptAudio(null);
-    setPreviousVideoPayload(null);
-    setExtendPrompt('');
-    setIsEditingImage(false);
-    setImageToEdit(null);
-    setEditPrompt('');
-  };
-
-  const resetForNewTab = (tab: GenerationType) => {
-    setPrompt('');
-    setLink('');
-    setImageStylePresets([]);
-    setVideoStylePresets([]);
-    setReferenceFrames([]);
-    setVoiceoverScripts(tab === 'speech' ? [{ id: 1, speaker: 'Speaker 1', script: '', voice: 'Kore' }] : []);
-    setIsLoading(false);
-    setIsExtending(false);
-    setIsGeneratingScriptAudio(false);
-    setActiveTab(tab);
-    resetGenerationState();
-    setIsFromScript(false);
-  };
-
-  const handleSelectKey = async () => {
-      if ((window as any).aistudio) {
-          await (window as any).aistudio.openSelectKey();
-          setApiKeySet(true); // Assume success to avoid race conditions
-      }
-  };
-
-  const fileToBase64 = (file: File) => new Promise<{ data: string, mimeType: string }>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => {
-        const result = reader.result as string;
-        resolve({ data: result.split(',')[1], mimeType: file.type });
-    };
-    reader.onerror = error => reject(error);
-  });
-  
-  const handleGenerateVideoFromScript = (script: string) => {
-    resetForNewTab('video');
-    setPrompt(script);
-    setVoiceoverScripts([{ id: 1, speaker: 'Narrator', script: script, voice: 'Kore' }]);
-    setIsFromScript(true);
-  };
-
-  const handleGenerateThumbnail = (concept: string) => {
-    resetForNewTab('image');
-    setPrompt(concept);
-    setImageAspectRatio('16:9'); // Default to a good thumbnail ratio
-  };
-  
-  const handleGenerateThumbnailFromHeader = () => {
-    if (parsedScript?.thumbnailConcepts?.[0]) {
-      handleGenerateThumbnail(parsedScript.thumbnailConcepts[0]);
-    } else {
-      setError("No thumbnail concepts were found in the generated script.");
-      setTimeout(() => setError(null), 3000);
-    }
-  };
-
-  const handleGenerateSocialPostFromScript = async (script: string) => {
-    if (!script || isGeneratingSocialPost) return;
-    if (!onAttemptGenerate()) return;
-
-    setIsGeneratingSocialPost(true);
-    try {
-        const post = await generateSocialPostFromScript(script, brandVoice);
-        setParsedScript(prev => prev ? { ...prev, socialPost: post } : null);
-        onSuccessfulGeneration();
-    } catch (err: any) {
-        setError(err.message || 'Failed to generate social post.');
-    } finally {
-        setIsGeneratingSocialPost(false);
-    }
-  };
-
-  const handleListenToScript = async (script: string, voice: string, style: string) => {
-    if (!script) return;
-    if (!onAttemptGenerate()) return;
-
-    if (scriptAudio) {
-        URL.revokeObjectURL(scriptAudio.url);
-        setScriptAudio(null);
-    }
-    
-    cancelRequestRef.current = false;
-    setIsGeneratingScriptAudio(true);
-    setError(null);
-    
-    try {
-        const audioBlob = await generateSpeechFromText(script, voice, style);
-        if (cancelRequestRef.current) return;
-        
-        const url = URL.createObjectURL(audioBlob);
-        setScriptAudio({ url, blob: audioBlob });
-        onSuccessfulGeneration();
-
-    } catch (err: any) {
-        if (cancelRequestRef.current) return;
-        setError(err.message || 'Failed to generate audio for the script.');
-    } finally {
-        setIsGeneratingScriptAudio(false);
-    }
-  };
-
-  const handleCancelScriptAudio = () => {
-    cancelRequestRef.current = true;
-    setIsGeneratingScriptAudio(false);
-  };
-  
-  const handleStartEdit = (imageDataUrl: string) => {
-      setIsEditingImage(true);
-      setImageToEdit(imageDataUrl);
-      setGeneratedContent(imageDataUrl);
-  };
-  
-  const handleCancelEdit = () => {
-      setIsEditingImage(false);
-      setImageToEdit(null);
-      setEditPrompt('');
-  };
-  
-  const handleExportFrame = (videoEl: HTMLVideoElement | null, fileName: string) => {
-      if (!videoEl) return;
-      const canvas = document.createElement('canvas');
-      canvas.width = videoEl.videoWidth;
-      canvas.height = videoEl.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-      const a = document.createElement('a');
-      a.href = canvas.toDataURL('image/png');
-      a.download = `${fileName}_frame_at_${Math.floor(videoEl.currentTime)}s.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-  };
-
-
-  const handleGenerate = async () => {
-    if (isEditingImage) {
-        if (!editPrompt.trim() || !imageToEdit) {
-            setError("Please enter an edit prompt.");
-            return;
-        }
-    } else {
-        const promptToUse = activeTab === 'speech' ? voiceoverScripts[0]?.script || '' : prompt;
-        if (!promptToUse.trim() && activeTab !== 'video' && voiceoverScripts.every(vs => !vs.script.trim())) {
-            setError('Please enter a prompt or script.');
-            return;
-        }
-    }
-
-    if (!onAttemptGenerate()) return;
-
-    if (activeTab === 'video') {
-        const hasKey = await (window as any).aistudio?.hasSelectedApiKey();
-        if (!hasKey) {
-            await handleSelectKey();
-             const hasKeyAfter = await (window as any).aistudio?.hasSelectedApiKey();
-             if(!hasKeyAfter) {
-                setError("An API key is required for video generation.");
-                return;
-             }
-        }
-        setApiKeySet(true);
-    }
-
-    setIsLoading(true);
-    if (!isEditingImage) {
-        resetGenerationState();
-    } else {
-        setError(null);
-        setGenerationWarning(null);
-    }
-
-    try {
-      let result: any = null;
-      let historyItem: Partial<PromptHistoryItem> = { prompt, timestamp: new Date().toISOString() };
-      
-      if (isEditingImage && imageToEdit) {
-          const [header, base64Data] = imageToEdit.split(',');
-          const mimeType = header.match(/:(.*?);/)?.[1] || 'image/png';
-          result = await editImage(base64Data, mimeType, editPrompt);
-          setGeneratedContent(result);
-          setImageToEdit(result);
-          setEditPrompt('');
-          historyItem = { prompt: `Original: "${prompt}". Edit: "${editPrompt}"`, type: 'image' };
-      } else {
-          const combinedImageStyles = imageStylePresets.join(', ');
-          const imagePrompt = `${prompt}${combinedImageStyles ? `. Style: ${combinedImageStyles}` : ''}`;
-          
-          const combinedVideoStyles = videoStylePresets.join(', ');
-          const durationTextMap: Record<VideoDuration, string> = { short: 'approximately 15 seconds long', medium: 'approximately 30 seconds long', long: 'approximately 60 seconds long' };
-          const durationText = durationTextMap[videoDuration];
-          const videoPrompt = `A high-quality video of: ${prompt}${combinedVideoStyles ? `. Style: ${combinedVideoStyles}` : ''}. The video should be ${durationText}. Aspect ratio should be ${videoAspectRatio}.`;
-
-          switch (activeTab) {
-            case 'script':
-              result = await generateViralScript(prompt, link, brandVoice);
-              setGeneratedContent(result);
-              setParsedScript(parseViralScript(result));
-              historyItem = { ...historyItem, type: 'script', link };
-              break;
-            case 'image':
-              result = await generateImage(imagePrompt, imageModel, imageAspectRatio, imageMimeType);
-              setGeneratedContent(result);
-              historyItem = { ...historyItem, type: 'image', imageModel, aspectRatio: imageAspectRatio, imageStylePresets, imageMimeType };
-              break;
-            case 'video':
-                const isMultiFrame = referenceFrames.length > 1;
-                const finalVideoModel = isMultiFrame ? 'veo-3.1-generate-preview' : videoModel;
-                const finalAspectRatio = isMultiFrame ? '16:9' : videoAspectRatio;
-                const finalResolution = isMultiFrame ? '720p' : resolution;
-                
-                const referenceFramesData = await Promise.all(referenceFrames.map(f => fileToBase64(f.file)));
-                const videoPromise = generateVideo(videoPrompt, finalVideoModel, finalAspectRatio, finalResolution, referenceFramesData);
-                
-                const validVoiceoverScripts = voiceoverScripts.filter(vs => vs.script.trim());
-                const audioPromise = validVoiceoverScripts.length > 0 ? generateSpeech(validVoiceoverScripts) : Promise.resolve(null);
-                
-                const [{url: videoResult, videoPayload}, audioResult] = await Promise.all([videoPromise, audioPromise]);
-                
-                setGeneratedVideo(videoResult);
-                setPreviousVideoPayload(videoPayload);
-
-                if(audioResult) {
-                    const audioPcm = new Int16Array(decode(audioResult).buffer);
-                    const audioBlob = pcmToMp3Blob(audioPcm, 24000, 1);
-                    setGeneratedAudio({ url: URL.createObjectURL(audioBlob), blob: audioBlob, format: 'mp3' });
+    const captureFrameAsFile = (videoEl: HTMLVideoElement): Promise<File> => {
+        return new Promise((resolve, reject) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = videoEl.videoWidth;
+            canvas.height = videoEl.videoHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return reject(new Error("Could not get canvas context"));
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+            canvas.toBlob(blob => {
+                if (blob) {
+                    const file = new File([blob], `frame_${Date.now()}.jpg`, { type: 'image/jpeg' });
+                    resolve(file);
+                } else {
+                    reject(new Error("Failed to create blob from canvas"));
                 }
+            }, 'image/jpeg', 0.95);
+        });
+    };
 
-                historyItem = { ...historyItem, type: 'video', videoModel, resolution, videoDuration, aspectRatio: videoAspectRatio, videoStylePresets, referenceFrameCount: referenceFrames.length, voiceoverScripts };
-                break;
-            case 'speech':
-                const speechScript = { id: 1, speaker: 'Speaker 1', script: prompt, voice: voiceoverScripts[0]?.voice || 'Kore' };
-                result = await generateSpeech([speechScript]);
-                const speechPcm = new Int16Array(decode(result).buffer);
-                const audioBlob = pcmToMp3Blob(speechPcm, 24000, 1);
-                setGeneratedAudio({ url: URL.createObjectURL(audioBlob), blob: audioBlob, format: 'mp3' });
-                historyItem = { ...historyItem, type: 'speech', voice: speechScript.voice };
-                break;
-          }
-      }
-      setPromptHistory(prev => [historyItem as PromptHistoryItem, ...prev.slice(0, 99)]);
-      onSuccessfulGeneration();
-      setIsFromScript(false);
-    } catch (err: any) {
-        if (err.name === 'ModerationError') {
-             setGenerationWarning(err.message);
-        } else {
-             setError(err.message || 'An unexpected error occurred during generation.');
-             if (err.message.includes("API Key validation failed")) {
-                setApiKeySet(false);
-             }
+    const onExportFrame = async (videoEl: HTMLVideoElement) => {
+        try {
+            const file = await captureFrameAsFile(videoEl);
+            const url = URL.createObjectURL(file);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch(e) {
+            setError((e as Error).message);
         }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  
-  const handleExtendVideo = async () => {
-    if (!extendPrompt || !previousVideoPayload) return;
-    if (!onAttemptGenerate()) return;
-
-    setIsExtending(true);
-    setError(null);
-    setGenerationWarning(null);
-
-    try {
-        const { url: newVideoUrl, videoPayload: newVideoPayload } = await extendVideo(extendPrompt, previousVideoPayload);
-        
-        if (generatedVideo) URL.revokeObjectURL(generatedVideo); // Clean up old video object URL
-        
-        setGeneratedVideo(newVideoUrl);
-        setPreviousVideoPayload(newVideoPayload); // The new video can also be extended
-        setExtendPrompt('');
-        onSuccessfulGeneration();
-
-    } catch (err: any) {
-         if (err.name === 'ModerationError') {
-             setGenerationWarning(err.message);
-        } else {
-             setError(err.message || 'An unexpected error occurred during extension.');
+    };
+    
+    const onUseFrameAsStart = async (videoEl: HTMLVideoElement) => {
+        try {
+            const file = await captureFrameAsFile(videoEl);
+            // Revoke old URLs to prevent memory leaks
+            referenceFrames.forEach(f => URL.revokeObjectURL(f.preview));
+            const newFrame = { file, preview: URL.createObjectURL(file) };
+            setReferenceFrames([newFrame]);
+            addNotification('Frame set as starting image.', 'success');
+        } catch(e) {
+            setError((e as Error).message);
         }
-    } finally {
-        setIsExtending(false);
-    }
-  };
+    };
 
-  const handleSelectFromHistory = (item: PromptHistoryItem) => {
-    resetForNewTab(item.type);
-    setPrompt(item.prompt);
-    if(item.type === 'script') setLink(item.link || '');
-    if(item.type === 'image') {
-        setImageModel(item.imageModel || 'imagen-4.0-generate-001');
-        setImageAspectRatio((item.aspectRatio || '1:1') as ImageAspectRatio);
-        setImageStylePresets(item.imageStylePresets || []);
-        setImageMimeType(item.imageMimeType || 'image/png');
-    }
-    if(item.type === 'video') {
-        setVideoModel(item.videoModel || 'veo-3.1-fast-generate-preview');
-        setResolution(item.resolution || '720p');
-        setVideoDuration(item.videoDuration || 'medium');
-        setVideoAspectRatio((item.aspectRatio || '16:9') as VideoAspectRatio);
-        setVideoStylePresets(item.videoStylePresets || []);
-        setVoiceoverScripts(item.voiceoverScripts?.map((vs, i) => ({ ...vs, id: i + 1 })) || []);
-        // Note: we don't restore reference frames or previous videos from history
-    }
-    if(item.type === 'speech') {
-        setVoiceoverScripts([{ id: 1, speaker: 'Speaker 1', script: item.prompt, voice: item.voice || 'Kore' }]);
-    }
-    setIsHistoryOpen(false);
-  };
-  
+    const onRemixFromFrame = async (videoEl: HTMLVideoElement) => {
+        try {
+            const file = await captureFrameAsFile(videoEl);
+            referenceFrames.forEach(f => URL.revokeObjectURL(f.preview));
+            const newFrame = { file, preview: URL.createObjectURL(file) };
+            setReferenceFrames([newFrame]);
+            setPrompt('A new scene, continuing from this image: ');
+            addNotification('Remixing from current frame. Describe the new scene!', 'info');
+        } catch (e) {
+            setError((e as Error).message);
+        }
+    };
 
-  const generationTabs = [
-    { id: 'script', label: 'Viral Script', icon: MagicWandIcon },
-    { id: 'image', label: 'Image', icon: ImageIcon },
-    { id: 'video', label: 'Video', icon: VideoCameraIcon },
-    { id: 'speech', label: 'Text-to-Speech', icon: SpeakerWaveIcon },
-  ];
+    const TABS: { id: GenerationType, label: string, icon: React.FC<any> }[] = [
+        { id: 'script', label: 'Viral Script', icon: MagicWandIcon },
+        { id: 'image', label: 'Image', icon: ImageIcon },
+        { id: 'video', label: 'Video', icon: VideoCameraIcon },
+        { id: 'speech', label: 'Speech', icon: SpeakerWaveIcon },
+    ];
 
-  return (
-    <div className="w-full">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-1 p-1 bg-gray-200 dark:bg-gray-700 rounded-lg mb-6">
-            {generationTabs.map((tab) => (
-            <button
-                key={tab.id}
-                onClick={() => resetForNewTab(tab.id as GenerationType)}
-                className={`w-full flex items-center justify-center px-2 py-2 text-sm font-semibold rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-indigo-500 ${
-                activeTab === tab.id
-                    ? 'bg-indigo-600 text-white shadow'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-                }`}
-                aria-pressed={activeTab === tab.id}
-            >
-                <tab.icon className="h-5 w-5 mr-2" />
-                {tab.label}
-            </button>
-            ))}
-        </div>
+    const currentPrompt = activeTab === 'speech'
+        ? (prompt.trim() || voiceoverScripts.map(vs => vs.script).join(' '))
+        : prompt;
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="flex flex-col">
-                <div className="flex justify-between items-center mb-4">
-                     <h3 className="text-xl font-bold">Creative Controls</h3>
-                     <button onClick={() => setIsHistoryOpen(true)} className="flex items-center text-sm font-medium text-gray-500 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400">
-                        <ClockIcon className="h-5 w-5 mr-1" />
-                        History
+    return (
+        <div className="space-y-8">
+            {isTemplatesModalOpen && (
+                <PromptTemplatesModal
+                    onClose={() => setIsTemplatesModalOpen(false)}
+                    onSelect={(template) => {
+                        setPrompt(template);
+                        setIsTemplatesModalOpen(false);
+                    }}
+                />
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
+                {/* Left Column: Controls */}
+                <div className="md:col-span-1 space-y-4">
+                    <div id="generation-type-tabs" className="flex bg-gray-200 dark:bg-gray-700 rounded-lg p-1">
+                        {TABS.map(({ id, label }) => (
+                            <button key={id} onClick={() => setActiveTab(id)} className={`w-full py-2 text-sm font-semibold rounded-md ${activeTab === id ? 'bg-white dark:bg-gray-800 shadow' : ''}`}>{label}</button>
+                        ))}
+                    </div>
+                    
+                    <GenerationControls
+                        activeTab={activeTab}
+                        prompt={prompt} setPrompt={setPrompt}
+                        onOpenTemplates={() => setIsTemplatesModalOpen(true)}
+                        link={link} setLink={setLink}
+                        imageModel={imageModel} setImageModel={setImageModel}
+                        imageAspectRatio={imageAspectRatio} setImageAspectRatio={setImageAspectRatio}
+                        imageStylePresets={imageStylePresets} setImageStylePresets={setImageStylePresets}
+                        imageMimeType={imageMimeType} setImageMimeType={setImageMimeType}
+                        videoModel={videoModel} setVideoModel={setVideoModel}
+                        videoAspectRatio={videoAspectRatio} setVideoAspectRatio={setVideoAspectRatio}
+                        resolution={resolution} setResolution={setResolution}
+                        videoDuration={videoDuration} setVideoDuration={setVideoDuration}
+                        videoStylePresets={videoStylePresets} setVideoStylePresets={setVideoStylePresets}
+                        referenceFrames={referenceFrames} setReferenceFrames={setReferenceFrames}
+                        apiKeySet={apiKeySet} handleSelectKey={handleSelectKey}
+                        inputApiKey={inputApiKey} setInputApiKey={setInputApiKey}
+                        isKeyValid={isKeyValid} isKeyValidating={isKeyValidating}
+                        keyValidationError={keyValidationError} handleValidateKey={handleValidateKey}
+                        voiceoverScripts={voiceoverScripts} setVoiceoverScripts={setVoiceoverScripts}
+                        watermark={watermark} setWatermark={setWatermark}
+                    />
+
+                    <button 
+                        id="generate-button"
+                        onClick={handleGenerate} 
+                        disabled={isLoading || isExtendingVideo || isRemixing}
+                        className="w-full inline-flex items-center justify-center px-6 py-4 border border-transparent text-lg font-bold rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400"
+                    >
+                        {isLoading ? 'Generating...' : `Generate ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}`}
+                    </button>
+                    
+                    <button onClick={() => setIsHistoryOpen(true)} className="w-full flex items-center justify-center p-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white">
+                        <ClockIcon className="h-4 w-4 mr-2" />
+                        View Prompt History
                     </button>
                 </div>
-                {isFromScript && (
-                    <div className="mb-4 p-3 bg-indigo-100 dark:bg-indigo-900/50 border-l-4 border-indigo-500 rounded-r-lg text-indigo-800 dark:text-indigo-200 flex justify-between items-center">
-                        <p className="text-sm">
-                            <span className="font-semibold">Script Loaded:</span> Ready for video generation.
-                        </p>
-                        <button onClick={() => setIsFromScript(false)} className="p-1 rounded-full hover:bg-indigo-200 dark:hover:bg-indigo-900">
-                            <XIcon className="h-4 w-4" />
-                        </button>
-                    </div>
-                )}
-                <GenerationControls 
-                    activeTab={activeTab}
-                    prompt={prompt} setPrompt={setPrompt}
-                    link={link} setLink={setLink}
-                    imageModel={imageModel} setImageModel={setImageModel}
-                    imageAspectRatio={imageAspectRatio} setImageAspectRatio={setImageAspectRatio}
-                    imageStylePresets={imageStylePresets} setImageStylePresets={setImageStylePresets}
-                    imageMimeType={imageMimeType} setImageMimeType={setImageMimeType}
-                    videoModel={videoModel} setVideoModel={setVideoModel}
-                    videoAspectRatio={videoAspectRatio} setVideoAspectRatio={setVideoAspectRatio}
-                    resolution={resolution} setResolution={setResolution}
-                    videoDuration={videoDuration} setVideoDuration={setVideoDuration}
-                    videoStylePresets={videoStylePresets} setVideoStylePresets={setVideoStylePresets}
-                    referenceFrames={referenceFrames} setReferenceFrames={setReferenceFrames}
-                    apiKeySet={apiKeySet} handleSelectKey={handleSelectKey}
-                    voiceoverScripts={voiceoverScripts} setVoiceoverScripts={setVoiceoverScripts}
-                />
-                 {isEditingImage && (
-                    <div className="mt-4 p-4 bg-purple-100 dark:bg-purple-900/50 rounded-lg space-y-2 border border-purple-300 dark:border-purple-700">
-                        <div className="flex justify-between items-center">
-                            <h4 className="font-semibold text-purple-800 dark:text-purple-200 flex items-center">
-                                <PencilIcon className="h-5 w-5 mr-2"/>
-                                Image Edit Mode
-                            </h4>
-                            <button onClick={handleCancelEdit} className="text-xs font-semibold text-purple-700 dark:text-purple-300 hover:underline">Cancel</button>
-                        </div>
-                        <textarea 
-                            rows={2}
-                            value={editPrompt}
-                            onChange={e => setEditPrompt(e.target.value)}
-                            className="block w-full px-3 py-2 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm"
-                            placeholder="e.g., Make the sky night time, add a cat..."
-                        />
-                    </div>
-                )}
-                 <button onClick={handleGenerate} disabled={isLoading} className="mt-6 w-full inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-indigo-300 dark:disabled:bg-indigo-800 disabled:cursor-not-allowed">
-                    {isLoading ? 'Generating...' : (isEditingImage ? 'Generate Edit' : 'Generate')}
-                </button>
-            </div>
-            <div className="bg-gray-100 dark:bg-gray-900/50 rounded-lg min-h-[500px]">
-               <GenerationCanvas 
-                    activeTab={activeTab}
-                    isLoading={isLoading}
-                    error={error}
-                    generationWarning={generationWarning}
-                    generatedContent={generatedContent}
-                    parsedScript={parsedScript}
-                    generatedAudio={generatedAudio}
-                    generatedVideo={generatedVideo}
-                    prompt={prompt}
-                    videoDuration={videoDuration}
-                    voiceoverScripts={voiceoverScripts}
-                    onGenerateVideoFromScript={handleGenerateVideoFromScript}
-                    onGenerateThumbnail={handleGenerateThumbnail}
-                    onGenerateThumbnailFromHeader={handleGenerateThumbnailFromHeader}
-                    onGenerateSocialPost={handleGenerateSocialPostFromScript}
-                    isGeneratingSocialPost={isGeneratingSocialPost}
-                    previousVideoPayload={previousVideoPayload}
-                    onExtendVideo={handleExtendVideo}
-                    isExtending={isExtending}
-                    extendPrompt={extendPrompt}
-                    setExtendPrompt={setExtendPrompt}
-                    onListenToScript={handleListenToScript}
-                    isGeneratingScriptAudio={isGeneratingScriptAudio}
-                    scriptAudio={scriptAudio}
-                    onCancelScriptAudio={handleCancelScriptAudio}
-                    onStartEdit={handleStartEdit}
-                    onExportFrame={handleExportFrame}
-               />
-            </div>
-        </div>
+                {/* Right Column: Results */}
+                <div id="generation-results-panel" className="md:col-span-2">
+                    {(isLoading && !isExtendingVideo && !isRemixing) && <Loader message="Your content is being generated..." onCancel={() => setIsLoading(false)} />}
+                    
+                    {viralScript && <ViralScriptCard 
+                        scriptData={{...viralScript, socialPost: generatedSocialPost || viralScript.socialPost}}
+                        onGenerateVideoFromScript={(script) => { setPrompt(script); setActiveTab('video'); }}
+                        onGenerateThumbnail={(concept) => { setActiveTab('image'); setPrompt(concept); }}
+                        onGenerateThumbnailFromHeader={() => { setActiveTab('image'); setPrompt(viralScript.titles[0] || viralScript.description); }}
+                        onGenerateSocialPost={handleGenerateSocialPost}
+                        isGeneratingSocialPost={isGeneratingSocialPost}
+                        onListenToScript={handleListenToScript}
+                        isGeneratingScriptAudio={isGeneratingScriptAudio}
+                        scriptAudio={scriptAudio}
+                        onCancelScriptAudio={() => setIsGeneratingScriptAudio(false)}
+                    />}
+                    
+                    {generatedImage && (
+                        <ResultCard title="Generated Image">
+                            <img src={generatedImage} alt={prompt} className="w-full rounded-lg" />
+                            <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-lg space-y-2">
+                                <h4 className="font-semibold">Edit Image</h4>
+                                <textarea rows={2} value={editPrompt} onChange={e => setEditPrompt(e.target.value)} className="w-full text-sm p-2 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md" placeholder="e.g., Now make it nighttime..." />
+                                <button onClick={handleEditImage} className="w-full p-2 text-sm font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700">Apply Edit</button>
+                            </div>
+                        </ResultCard>
+                    )}
 
-        <PromptHistoryModal 
-            isOpen={isHistoryOpen}
-            onClose={() => setIsHistoryOpen(false)}
-            history={promptHistory}
-            onSelect={handleSelectFromHistory}
-            onClear={() => setPromptHistory([])}
-            onDelete={(timestamp) => setPromptHistory(prev => prev.filter(item => item.timestamp !== timestamp))}
-        />
-    </div>
-  );
+                    {generatedVideo && <ResultCard title="Generated Video" actions={
+                        <a href={generatedVideo.url} download={`${slugify(prompt)}.mp4`} className="px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600">Download</a>
+                    }>
+                        <VideoResult 
+                            video={generatedVideo} 
+                            prompt={prompt}
+                            watermark={watermark}
+                            onExtend={handleExtendVideo}
+                            isExtending={isExtendingVideo}
+                            onRemix={handleRemixVideo}
+                            isRemixing={isRemixing}
+                            onCancel={() => { setIsExtendingVideo(false); setIsRemixing(false); }}
+                            onExportSrt={onExportSrt}
+                            onExportFrame={onExportFrame}
+                            onUseFrameAsStart={onUseFrameAsStart}
+                            onRemixFromFrame={onRemixFromFrame}
+                        />
+                    </ResultCard>}
+                    
+                    {generatedSpeechUrl && (
+                        <ResultCard title="Generated Speech" actions={
+                             <a href={generatedSpeechUrl} download={`${slugify(currentPrompt)}.mp3`} className="px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600">Download MP3</a>
+                        }>
+                            <audio src={generatedSpeechUrl} controls autoPlay className="w-full" />
+                        </ResultCard>
+                    )}
+
+                </div>
+            </div>
+            <PromptHistoryModal 
+                isOpen={isHistoryOpen}
+                onClose={() => setIsHistoryOpen(false)}
+                history={promptHistory}
+                onSelect={handleSelectFromHistory}
+                onClear={() => setPromptHistory([])}
+                onDelete={(timestamp) => setPromptHistory(prev => prev.filter(item => item.timestamp !== timestamp))}
+            />
+        </div>
+    );
 };

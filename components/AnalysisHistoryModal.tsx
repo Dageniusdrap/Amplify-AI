@@ -10,6 +10,10 @@ import { UsersIcon } from './icons/UsersIcon';
 import { TrendingUpIcon } from './icons/TrendingUpIcon';
 import { SparklesIcon } from './icons/SparklesIcon';
 import { BroadcastIcon } from './icons/BroadcastIcon';
+import { MicrophoneIcon } from './icons/MicrophoneIcon';
+import { CurrencyDollarIcon } from './icons/CurrencyDollarIcon';
+import { ChevronDownIcon } from './icons/ChevronDownIcon';
+import { FilmIcon } from './icons/FilmIcon';
 
 interface AnalysisHistoryModalProps {
   isOpen: boolean;
@@ -20,27 +24,47 @@ interface AnalysisHistoryModalProps {
   onDelete: (timestamp: string) => void;
 }
 
+// FIX: Added 'financialReport' to satisfy the type.
 const analysisTypeDetails: { [key in AnalysisHistoryItem['analysisType']]: { label: string, icon: React.FC<any>, color: string } } = {
     salesCall: { label: 'Sales Call', icon: TrendingUpIcon, color: 'text-green-500' },
     socialMedia: { label: 'Social Media', icon: UsersIcon, color: 'text-blue-500' },
     productAd: { label: 'Product Ad', icon: SparklesIcon, color: 'text-yellow-500' },
     videoAnalysis: { label: 'Video Analysis', icon: VideoCameraIcon, color: 'text-red-500' },
+    videoToScript: { label: 'Video to Script', icon: FilmIcon, color: 'text-orange-500' },
     documentAnalysis: { label: 'Document', icon: DocumentTextIcon, color: 'text-purple-500' },
+    financialReport: { label: 'Financial Report', icon: CurrencyDollarIcon, color: 'text-teal-500' },
     liveStream: { label: 'Live Stream', icon: BroadcastIcon, color: 'text-cyan-500' },
+    liveDebugger: { label: 'Live Debug', icon: MicrophoneIcon, color: 'text-gray-500' },
 };
 
 
 export const AnalysisHistoryModal: React.FC<AnalysisHistoryModalProps> = ({ isOpen, onClose, history, onSelect, onClear, onDelete }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [filter, setFilter] = useState<AnalysisHistoryItem['analysisType'] | 'all'>('all');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
 
   const filteredHistory = useMemo(() => {
-    if (!searchQuery) return history;
+    let items = [...history]; // Create a copy to sort
+
+    // Sort items
+    items.sort((a, b) => {
+      const dateA = new Date(a.timestamp).getTime();
+      const dateB = new Date(b.timestamp).getTime();
+      return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
+    });
+
+    if (filter !== 'all') {
+        items = items.filter(item => item.analysisType === filter);
+    }
+
+    if (!searchQuery) return items;
+    
     const lowercasedQuery = searchQuery.toLowerCase();
-    return history.filter(item =>
+    return items.filter(item =>
       (item.fileName && item.fileName.toLowerCase().includes(lowercasedQuery)) ||
       (item.result.transcript && item.result.transcript.some(t => t.text.toLowerCase().includes(lowercasedQuery)))
     );
-  }, [history, searchQuery]);
+  }, [history, searchQuery, filter, sortOrder]);
   
   if (!isOpen) return null;
 
@@ -52,6 +76,8 @@ export const AnalysisHistoryModal: React.FC<AnalysisHistoryModalProps> = ({ isOp
       minute: '2-digit'
     });
   };
+
+  const availableFilters = useMemo(() => Array.from(new Set(history.map(item => item.analysisType))), [history]);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -87,6 +113,38 @@ export const AnalysisHistoryModal: React.FC<AnalysisHistoryModalProps> = ({ isOp
               <SearchIcon className="h-5 w-5 text-gray-400" />
             </div>
           </div>
+          {availableFilters.length > 0 && (
+            <div className="flex justify-between items-center mt-3">
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        onClick={() => setFilter('all')}
+                        className={`px-3 py-1 text-xs font-medium rounded-full ${filter === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}
+                    >
+                        All
+                    </button>
+                    {availableFilters.map(type => (
+                        <button
+                            key={type}
+                            onClick={() => setFilter(type)}
+                            className={`px-3 py-1 text-xs font-medium rounded-full capitalize ${filter === type ? 'bg-indigo-600 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}
+                        >
+                            {analysisTypeDetails[type]?.label || type}
+                        </button>
+                    ))}
+                </div>
+                 <div className="relative">
+                    <select
+                        value={sortOrder}
+                        onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
+                        className="text-xs font-medium appearance-none bg-gray-200 dark:bg-gray-700 border-none rounded-full py-1 pl-3 pr-8 focus:ring-2 focus:ring-indigo-500"
+                    >
+                        <option value="newest">Newest First</option>
+                        <option value="oldest">Oldest First</option>
+                    </select>
+                    <ChevronDownIcon className="h-4 w-4 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500 dark:text-gray-400" />
+                </div>
+            </div>
+        )}
         </div>
 
         <div className="flex-grow overflow-y-auto p-4">

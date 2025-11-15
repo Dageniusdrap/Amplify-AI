@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Amplify AI</title>
+    <title>Creators Edge AI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
   <script type="importmap">
@@ -18,8 +18,20 @@
   }
 }
 </script>
+<style>
+  @keyframes gradient {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  body {
+    background: linear-gradient(-45deg, #02042b, #4a0e89, #0081a7, #8e2d84);
+    background-size: 400% 400%;
+    animation: gradient 20s ease infinite;
+  }
+</style>
 </head>
-  <body class="bg-gray-100 dark:bg-gray-900">
+  <body>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

@@ -1,10 +1,11 @@
-import type { AnalysisType } from './components/AnalysisTypeSelector';
+import type { AnalysisType } from './components/SidebarNav';
 
 export interface TranscriptEntry {
   speaker: string;
   text: string;
   startTime?: number;
   endTime?: number;
+  tags?: string[];
 }
 
 export interface PerformanceScore {
@@ -17,20 +18,132 @@ export interface PerformanceMetricPoint {
     scores: PerformanceScore[];
 }
 
-
 export interface FeedbackCardData {
   strengths: string[];
   opportunities: string[];
 }
 
-export interface SocialMediaAnalysis {
-    hookEffectiveness: string;
-    visualAppeal: string;
-    callToAction: string;
-    brandConsistency: string;
-    overallScore: number;
-    [key: string]: string | number; // Index signature
+export interface AudioAnalysis {
+    qualityScore: number;
+    qualityCritique: string;
+    qualitySuggestion: string;
+    pacingWPM: number;
+    fillerWordCount: number;
+    sentiment: string;
 }
+
+export interface SpeechAnalysis {
+    pacingWPM: number;
+    fillerWordCount: number;
+    dominantTone: string;
+}
+
+export interface KeywordAnalysis {
+    keywords: string[];
+    topics: string[];
+}
+
+export interface MomentsSummary {
+    objections: number;
+    actionItems: number;
+    keyDecisions: number;
+}
+
+export interface AudienceRetentionPredictionPoint {
+    timeLabel: string;
+    retentionPercent: number;
+    reason: string;
+}
+
+export interface ViralityCurvePoint {
+    timeLabel: string; // e.g., "1h", "6h", "24h", "3d", "7d"
+    predictedViews: number;
+}
+
+export interface SalesCallAnalysis {
+    summary: string;
+    overallPerformance: string;
+    rapportBuilding: string;
+    needsDiscovery: string;
+    productPresentation: string;
+    objectionHandling: string;
+    closingEffectiveness: string;
+    clarityScore: number;
+    confidenceScore: number;
+    speechAnalyses?: { [speakerId: string]: SpeechAnalysis };
+    strengths: string[];
+    weaknesses: string[];
+    areasOfImprovement: string[];
+    momentsSummary?: MomentsSummary;
+    brandVoiceAlignment?: {
+        score: number;
+        analysis: string;
+    };
+    talkTimeRatio?: { // Renamed for clarity and flexibility
+        [speakerId: string]: number; // e.g., { 'A': 65, 'B': 35 }
+    };
+    talkToListenRatio?: { // Keep for backward compatibility if needed, but prefer talkTimeRatio
+        salesperson: number;
+        client: number;
+        analysis: string;
+    };
+    viralitySuggestions: {
+        title: string;
+        description: string;
+        hooks: string[];
+        keyViralMoment?: string;
+        viralityScore?: number;
+        timeline: {
+            hours: string;
+            day: string;
+            week: string;
+        };
+    };
+    [key: string]: any;
+}
+
+export interface SocialMediaAnalysis {
+    hookEffectiveness: {
+        score: number;
+        critique: string;
+        suggestion: string;
+    };
+    visualAppeal: {
+        score: number;
+        critique: string;
+        suggestion: string;
+    };
+    callToAction: {
+        score: number;
+        critique: string;
+        suggestion: string;
+    };
+    brandConsistency: {
+        score: number;
+        critique: string;
+    };
+    overallScore: number;
+    engagementPrediction: string;
+    captionAndHashtags: {
+        critique: string;
+        suggestedCaption: string;
+        suggestedHashtags: string[];
+    };
+    suggestedImprovements: string[];
+    viralityScore: number;
+    viralitySuggestions: {
+        hooks: string[];
+        strategies: string[];
+        timeline: {
+            hours: string;
+            day: string;
+            week: string;
+        };
+    };
+    targetAudience: string;
+    [key: string]: any;
+}
+
 
 export interface AdAnalysis {
     clarityOfMessage: string;
@@ -41,21 +154,65 @@ export interface AdAnalysis {
     [key: string]: string | number; // Index signature
 }
 
+export interface EditingSuggestion {
+    timestamp: string;
+    type: 'Cut' | 'Effect' | 'Text' | 'Audio';
+    suggestion: string;
+}
+
 export interface VideoAnalysis {
     visualPacing: string;
-    audioQuality: string;
+    audioAnalysis?: AudioAnalysis;
     messageClarity: string;
     brandConsistency: string;
     engagementPotential: string;
     editingStyle: string;
-    thumbnailSuggestion: string;
-    captionQuality: string;
+    thumbnailSuggestion: {
+        score: number;
+        critique: string;
+        suggestion: string;
+    };
+    captionQuality: {
+        score: number;
+        critique: string;
+        suggestion: string;
+    };
     viralityScore: number;
     overallScore: number;
     suggestedAudience: string;
-    hookQuality: string;
+    hookQuality: {
+        score: number;
+        critique: string;
+        suggestion: string;
+    };
     monetizationPotential: string;
-    [key: string]: string | number;
+    suggestedImprovements: string[];
+    audienceRetentionPrediction?: AudienceRetentionPredictionPoint[];
+    momentsSummary?: MomentsSummary;
+    ctaEffectiveness?: {
+        score: number;
+        critique: string;
+        suggestion: string;
+        placementAnalysis: string;
+        wordingAnalysis: string;
+    };
+    keyViralMoment?: string;
+    viralityTimeline?: { hours: string; day: string; week: string; };
+    viralityCurve?: ViralityCurvePoint[];
+    technicalQuality?: {
+        resolutionClarity: { score: number; critique: string; suggestion: string; };
+        lighting: { score: number; critique: string; suggestion: string; };
+        colorGrading: { score: number; critique: string; suggestion: string; };
+    };
+    viralitySuggestions?: {
+        hooks: string[];
+    };
+    engagementStrategy?: string[];
+    suggestedDescription?: string;
+    suggestedTitles?: string[];
+    suggestedTags?: string[];
+    editingSuggestions?: EditingSuggestion[];
+    [key: string]: any;
 }
 
 export interface LiveStreamAnalysis {
@@ -80,15 +237,31 @@ export interface DocumentAnalysis {
     [key: string]: string | number | string[];
 }
 
+export interface FinancialReportAnalysis {
+    summary: string;
+    keyMetrics: {
+        metric: string;
+        value: string;
+        analysis: string;
+    }[];
+    overallSentiment: 'Positive' | 'Negative' | 'Neutral' | 'Mixed';
+    sentimentAnalysis: string;
+    keyRisks: string[];
+    keyOpportunities: string[];
+}
+
 export interface AnalysisResult {
   transcript?: TranscriptEntry[];
   performanceMetrics?: PerformanceMetricPoint[];
   feedbackCard: FeedbackCardData;
+  keywordAnalysis?: KeywordAnalysis;
+  salesCallAnalysis?: SalesCallAnalysis;
   socialMediaAnalysis?: SocialMediaAnalysis;
   adAnalysis?: AdAnalysis;
   videoAnalysis?: VideoAnalysis;
   liveStreamAnalysis?: LiveStreamAnalysis;
   documentAnalysis?: DocumentAnalysis;
+  financialReportAnalysis?: FinancialReportAnalysis;
   keyTakeaways?: string[];
 }
 
@@ -143,7 +316,7 @@ export interface User {
 
 export interface AnalysisHistoryItem {
   result: AnalysisResult;
-  analysisType: 'salesCall' | 'socialMedia' | 'productAd' | 'videoAnalysis' | 'documentAnalysis' | 'liveStream';
+  analysisType: 'salesCall' | 'socialMedia' | 'productAd' | 'videoAnalysis' | 'documentAnalysis' | 'liveStream' | 'liveDebugger' | 'financialReport' | 'videoToScript';
   timestamp: string;
   fileName?: string;
 }
@@ -159,9 +332,15 @@ export interface PromptHistoryItem {
   imageMimeType?: 'image/jpeg' | 'image/png';
   videoModel?: 'veo-3.1-fast-generate-preview' | 'veo-3.1-generate-preview';
   resolution?: '720p' | '1080p';
-  videoDuration?: 'short' | 'medium' | 'long';
+  videoDuration?: number;
   videoStylePresets?: string[];
   referenceFrameCount?: number;
   voiceoverScripts?: VoiceoverScript[];
   voice?: string;
+}
+
+export interface Notification {
+  id: number;
+  message: string;
+  type: 'success' | 'error' | 'info';
 }

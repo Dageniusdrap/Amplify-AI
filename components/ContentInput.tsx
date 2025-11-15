@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { UploadIcon } from './icons/UploadIcon';
-import type { AnalysisType } from './AnalysisTypeSelector';
+import { XIcon } from './icons/XIcon';
+import type { AnalysisType } from './SidebarNav';
 
 interface ContentInputProps {
   onInputsChange: (inputs: { script: string; description:string }) => void;
@@ -8,11 +9,12 @@ interface ContentInputProps {
   isLoading: boolean;
   inputs: { script: string; description: string };
   onFileSelect: (file: File) => void;
+  onClearFile: () => void;
   selectedFile: File | null;
   analysisType: AnalysisType;
 }
 
-export const ContentInput: React.FC<ContentInputProps> = ({ onInputsChange, onSubmit, isLoading, inputs, onFileSelect, selectedFile, analysisType }) => {
+export const ContentInput: React.FC<ContentInputProps> = ({ onInputsChange, onSubmit, isLoading, inputs, onFileSelect, onClearFile, selectedFile, analysisType }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -46,15 +48,28 @@ export const ContentInput: React.FC<ContentInputProps> = ({ onInputsChange, onSu
     onInputsChange({ ...inputs, description: e.target.value });
   };
 
-  const showUploader = analysisType === 'socialMedia' || analysisType === 'productAd' || analysisType === 'documentAnalysis';
-  const isDocMode = analysisType === 'documentAnalysis';
-  let buttonText = selectedFile && !isDocMode ? 'Transcribe & Analyze' : 'Analyze Content';
-  if (isDocMode && selectedFile) buttonText = 'Analyze Document';
+  const showUploader = ['salesCall', 'socialMedia', 'productAd', 'documentAnalysis', 'financialReport'].includes(analysisType);
+  const isDocMode = analysisType === 'documentAnalysis' || analysisType === 'financialReport';
+  const isCallMode = analysisType === 'salesCall';
+  
+  let buttonText = 'Analyze Content';
+  if (selectedFile) {
+    if (isDocMode) buttonText = 'Analyze Document';
+    else if (isCallMode) buttonText = 'Transcribe & Analyze Call';
+    else buttonText = 'Transcribe & Analyze';
+  } else if (isCallMode) {
+    buttonText = 'Analyze Call Script';
+  } else if (isDocMode) {
+    buttonText = 'Analyze Document';
+  }
+
 
   const uploaderConfig = {
+    salesCall: { label: "Upload call recording or transcript", types: "MP3, MP4, TXT, etc.", accept: "audio/*,video/*,.txt,.md" },
     socialMedia: { label: "Upload audio/video", types: "MP3, WAV, MP4, MOV, etc.", accept: "audio/*,video/*" },
     productAd: { label: "Upload audio/video", types: "MP3, WAV, MP4, MOV, etc.", accept: "audio/*,video/*" },
     documentAnalysis: { label: "Upload document", types: "TXT, MD, or paste content below", accept: ".txt,.md" },
+    financialReport: { label: "Upload financial report", types: "TXT, MD, PDF, or paste content", accept: ".txt,.md,.pdf" },
   };
   const currentUploaderConfig = uploaderConfig[analysisType as keyof typeof uploaderConfig];
 
@@ -87,11 +102,20 @@ export const ContentInput: React.FC<ContentInputProps> = ({ onInputsChange, onSu
                 />
             </label>
             {selectedFile && (
-                <div className="text-center text-sm text-gray-700 dark:text-gray-300 space-y-1 py-2">
-                  <p>Selected: <span className="font-medium">{selectedFile.name}</span></p>
-                  <p className="text-indigo-600 dark:text-indigo-400 font-semibold">
-                    {isDocMode ? 'File content has been loaded into the text area.' : 'The uploaded file will be transcribed as part of the analysis.'}
-                  </p>
+                <div className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-center">
+                    <div className="flex justify-between items-center">
+                        <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate pr-2">{selectedFile.name}</p>
+                        <button 
+                            onClick={onClearFile}
+                            className="p-1 rounded-full text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-200"
+                            aria-label="Remove file"
+                        >
+                            <XIcon className="h-5 w-5" />
+                        </button>
+                    </div>
+                    <p className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold mt-1">
+                        {isDocMode || (isCallMode && selectedFile.type.startsWith('text/')) ? 'File content has been loaded into the text area.' : 'The uploaded file will be transcribed as part of the analysis.'}
+                    </p>
                 </div>
             )}
             <div className="flex items-center">
@@ -104,16 +128,16 @@ export const ContentInput: React.FC<ContentInputProps> = ({ onInputsChange, onSu
 
       <div>
         <label htmlFor="content-script" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-          {isDocMode ? 'Document Content' : 'Content Script / Text'}
+          {isDocMode ? 'Document Content' : (isCallMode ? 'Call Transcript' : 'Content Script / Text')}
         </label>
         <textarea
           id="content-script"
           rows={isDocMode ? 10 : 6}
           className="block w-full px-3 py-2 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:bg-gray-100 dark:disabled:bg-gray-700 disabled:cursor-not-allowed"
-          placeholder={selectedFile && showUploader && !isDocMode ? "Script will be transcribed from the uploaded file." : "Paste the transcript of your video, the text of your post, or the copy of your ad here..."}
+          placeholder={selectedFile && showUploader && !isDocMode && !isCallMode ? "Script will be transcribed from the uploaded file." : "Paste the transcript of your call, the text of your post, or the copy of your ad here..."}
           value={inputs.script}
           onChange={handleScriptChange}
-          disabled={showUploader && !!selectedFile && !isDocMode}
+          disabled={showUploader && !!selectedFile && !isDocMode && !(isCallMode && selectedFile.type.startsWith('text/'))}
         />
       </div>
       <div>
